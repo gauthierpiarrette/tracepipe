@@ -20,7 +20,7 @@ class TestExplainAPI:
     def test_explain_all(self):
         df = pd.DataFrame({"a": [1, 2, 3]})
         df = df.fillna(0)
-        df = df.copy()
+        df = df.sort_values("a")
         
         result = tracepipe.explain()
         
@@ -106,7 +106,7 @@ class TestSummaryAPI:
     def test_summary_with_operations(self):
         df = pd.DataFrame({"a": [1, 2, 3]})
         df = df.fillna(0)
-        df = df.copy()
+        df = df.sort_values("a")
         
         result = tracepipe.summary()
         
@@ -120,7 +120,7 @@ class TestSummaryAPI:
             df = df.fillna(0)
         
         with tracepipe.stage("stage2"):
-            df = df.copy()
+            df = df.sort_values("a")
         
         result = tracepipe.summary()
         

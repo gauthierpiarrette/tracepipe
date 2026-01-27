@@ -94,33 +94,35 @@ class TestPandasInstrumentation:
 
     def test_getitem_tracked(self):
         df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
-        result = df[df["a"] > 1]
+    def test_query_tracked(self):
+        df = pd.DataFrame({"a": [1, 2, 3, 4, 5], "b": [5, 4, 3, 2, 1]})
+        result = df.query("a > 2")
         
         graph = get_graph()
         nodes = graph.get_all_nodes()
         
-        getitem_nodes = [n for n in nodes if "__getitem__" in n.operation_name]
-        assert len(getitem_nodes) >= 1
+        query_nodes = [n for n in nodes if "query" in n.operation_name]
+        assert len(query_nodes) >= 1
 
-    def test_assign_tracked(self):
-        df = pd.DataFrame({"a": [1, 2, 3]})
-        result = df.assign(b=lambda x: x["a"] * 2)
+    def test_filter_tracked(self):
+        df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6], "c": [7, 8, 9]})
+        result = df.filter(items=["a", "b"])
         
         graph = get_graph()
         nodes = graph.get_all_nodes()
         
-        assign_nodes = [n for n in nodes if "assign" in n.operation_name]
-        assert len(assign_nodes) >= 1
+        filter_nodes = [n for n in nodes if "filter" in n.operation_name]
+        assert len(filter_nodes) >= 1
 
-    def test_copy_tracked(self):
-        df = pd.DataFrame({"a": [1, 2, 3]})
-        result = df.copy()
+    def test_sort_values_tracked(self):
+        df = pd.DataFrame({"a": [3, 1, 2]})
+        result = df.sort_values("a")
         
         graph = get_graph()
         nodes = graph.get_all_nodes()
         
-        copy_nodes = [n for n in nodes if "copy" in n.operation_name]
-        assert len(copy_nodes) >= 1
+        sort_nodes = [n for n in nodes if "sort" in n.operation_name]
+        assert len(sort_nodes) >= 1
 
     def test_stage_annotation(self):
         df = pd.DataFrame({"a": [1, 2, None], "b": [4, None, 6]})
@@ -130,7 +132,7 @@ class TestPandasInstrumentation:
             df = df.dropna()
         
         with tracepipe.stage("transform"):
-            df = df.astype({"a": int})
+            df = df.sort_values("a")
         
         graph = get_graph()
         nodes = graph.get_all_nodes()
