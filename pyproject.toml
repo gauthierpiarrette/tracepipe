@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tracepipe"
+version = "1.0.0"
+description = "Automatic data lineage & debugging for ML pipelines"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    {name = "TracePipe Contributors"}
+]
+keywords = ["ml", "data-lineage", "debugging", "mlops", "pandas", "numpy", "sklearn"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "networkx>=3.0",
+]
+
+[project.optional-dependencies]
+sklearn = ["scikit-learn>=1.3.0"]
+polars = ["polars>=0.20.0"]
+viz = ["jinja2>=3.0.0"]
+all = [
+    "scikit-learn>=1.3.0",
+    "polars>=0.20.0",
+    "jinja2>=3.0.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/tracepipe/tracepipe"
+Documentation = "https://tracepipe.dev"
+Repository = "https://github.com/tracepipe/tracepipe"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tracepipe"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
