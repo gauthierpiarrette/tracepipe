@@ -9,20 +9,60 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import pandas as pd
 
 from tracepipe.core import (
-    LineageGraph,
+    DataSnapshot,
     OperationType,
     get_code_location,
     get_context,
-    get_graph,
 )
 
 _ORIGINAL_METHODS: Dict[str, Callable] = {}
+
+_HIGH_VALUE_METHODS = [
+    "fillna",
+    "dropna",
+    "drop_duplicates",
+    "merge",
+    "join",
+    "concat",
+    "groupby",
+    "pivot",
+    "pivot_table",
+    "melt",
+    "apply",
+    "transform",
+    "agg",
+    "aggregate",
+    "query",
+    "filter",
+    "rename",
+    "astype",
+    "sort_values",
+    "sort_index",
+    "reset_index",
+    "set_index",
+    "head",
+    "tail",
+    "sample",
+    "nlargest",
+    "nsmallest",
+]
+
+_NOISE_METHODS = [
+    "__getitem__",
+    "mean",
+    "sum",
+    "min",
+    "max",
+    "count",
+    "std",
+    "var",
+]
+
 _TRANSFORM_METHODS = [
     "apply",
     "transform",
     "pipe",
     "map",
-    "applymap",
     "replace",
     "fillna",
     "dropna",
@@ -40,14 +80,9 @@ _TRANSFORM_METHODS = [
     "unstack",
     "explode",
     "clip",
-    "round",
-    "abs",
     "diff",
     "pct_change",
     "shift",
-    "rolling",
-    "expanding",
-    "ewm",
     "interpolate",
     "bfill",
     "ffill",
@@ -57,6 +92,7 @@ _TRANSFORM_METHODS = [
     "nlargest",
     "nsmallest",
     "assign",
+    "copy",
 ]
 
 _FILTER_METHODS = [
@@ -64,19 +100,12 @@ _FILTER_METHODS = [
     "filter",
     "where",
     "mask",
-    "loc.__getitem__",
-    "iloc.__getitem__",
-    "__getitem__",
 ]
 
 _JOIN_METHODS = [
     "merge",
     "join",
     "concat",
-    "append",
-    "combine",
-    "combine_first",
-    "update",
 ]
 
 _AGGREGATE_METHODS = [
@@ -84,24 +113,7 @@ _AGGREGATE_METHODS = [
     "resample",
     "agg",
     "aggregate",
-    "sum",
-    "mean",
-    "median",
-    "min",
-    "max",
-    "count",
-    "std",
-    "var",
-    "sem",
-    "describe",
-    "value_counts",
-    "nunique",
-    "cumsum",
-    "cummax",
-    "cummin",
-    "cumprod",
 ]
-
 
 def _classify_operation(method_name: str) -> OperationType:
     if method_name in _FILTER_METHODS or method_name.endswith("__getitem__"):
@@ -127,11 +139,13 @@ def _wrap_method(cls: type, method_name: str, original: Callable) -> Callable:
         if not ctx.enabled:
             return original(self, *args, **kwargs)
         
+        if method_name in _NOISE_METHODS:
+            return original(self, *args, **kwargs)
+        
         result = original(self, *args, **kwargs)
         
-        if isinstance(result, (pd.DataFrame, pd.Series)):
+        if isinstance(result, (pd.DataFrame, pd.Series)) and method_name in _HIGH_VALUE_METHODS:
             operation = _classify_operation(method_name)
-            
             params = _extract_params(method_name, args, kwargs)
             
             ctx.graph.add_node(
@@ -152,15 +166,25 @@ def _wrap_setitem(original: Callable) -> Callable:
     @functools.wraps(original)
     def wrapper(self, key, value):
         ctx = get_context()
+        input_snapshot = None
+        
+        if ctx.enabled and isinstance(key, str):
+            input_snapshot = DataSnapshot.from_dataframe(self)
+        
         original(self, key, value)
         
-        if ctx.enabled:
+        if ctx.enabled and isinstance(key, str):
+            col_name = key
+            is_new = col_name not in (input_snapshot.columns if input_snapshot else [])
+            
+            op_name = f"Added column '{col_name}'" if is_new else f"Updated column '{col_name}'"
+            
             ctx.graph.add_node(
                 operation=OperationType.ASSIGN,
-                operation_name=f"DataFrame.__setitem__[{key}]",
+                operation_name=op_name,
                 input_data=None,
                 output_data=self,
-                parameters={"column": str(key)},
+                parameters={"column": col_name, "is_new": is_new},
                 code_location=get_code_location(depth=3),
             )
     
@@ -262,11 +286,7 @@ def instrument_pandas():
     if ctx.is_instrumented("pandas"):
         return
     
-    all_methods = set(_TRANSFORM_METHODS + _JOIN_METHODS + _AGGREGATE_METHODS)
-    all_methods.add("copy")
-    all_methods.add("__getitem__")
-    
-    for method_name in all_methods:
+    for method_name in _HIGH_VALUE_METHODS:
         if hasattr(pd.DataFrame, method_name):
             original = getattr(pd.DataFrame, method_name)
             if callable(original):
@@ -275,11 +295,7 @@ def instrument_pandas():
                     _ORIGINAL_METHODS[key] = original
                     setattr(pd.DataFrame, method_name, _wrap_method(pd.DataFrame, method_name, original))
     
-    if "__setitem__" not in _ORIGINAL_METHODS:
-        _ORIGINAL_METHODS["DataFrame.__setitem__"] = pd.DataFrame.__setitem__
-        pd.DataFrame.__setitem__ = _wrap_setitem(pd.DataFrame.__setitem__)
-    
-    series_methods = ["apply", "map", "transform", "fillna", "dropna", "replace", "astype", "copy"]
+    series_methods = ["fillna", "dropna", "astype", "copy"]
     for method_name in series_methods:
         if hasattr(pd.Series, method_name):
             original = getattr(pd.Series, method_name)
@@ -288,6 +304,11 @@ def instrument_pandas():
                 if key not in _ORIGINAL_METHODS:
                     _ORIGINAL_METHODS[key] = original
                     setattr(pd.Series, method_name, _wrap_method(pd.Series, method_name, original))
+    
+    if hasattr(pd.DataFrame, "__setitem__"):
+        original_setitem = getattr(pd.DataFrame, "__setitem__")
+        _ORIGINAL_METHODS["DataFrame.__setitem__"] = original_setitem
+        setattr(pd.DataFrame, "__setitem__", _wrap_setitem(original_setitem))
     
     ctx.mark_instrumented("pandas")
 
