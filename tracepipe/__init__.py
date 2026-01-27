@@ -64,18 +64,22 @@ __all__ = [
 
 def enable(
     pandas: bool = True,
-    numpy: bool = True,
+    numpy: bool = False,
     sklearn: bool = True,
 ) -> None:
     """
     Enable tracepipe lineage tracking.
     
-    This instruments pandas, numpy, and sklearn (if available) to automatically
+    This instruments pandas and sklearn (if available) to automatically
     capture data transformations. Call this at the start of your script.
+    
+    Note: numpy instrumentation is disabled by default because pandas
+    internally calls many numpy functions, creating noise. Enable it
+    explicitly if you need to track standalone numpy operations.
     
     Args:
         pandas: Instrument pandas DataFrame operations (default: True)
-        numpy: Instrument numpy array operations (default: True)
+        numpy: Instrument numpy array operations (default: False - creates noise)
         sklearn: Instrument sklearn transformers and models (default: True)
     
     Example:
