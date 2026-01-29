@@ -4,62 +4,106 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tracepipe"
-version = "1.0.0"
-description = "Automatic data lineage & debugging for ML pipelines"
+version = "0.2.0"
+description = "Row-level data lineage tracking for pandas pipelines"
 readme = "README.md"
-license = "MIT"
-requires-python = ">=3.10"
+license = {file = "LICENSE"}
+requires-python = ">=3.9"
 authors = [
-    {name = "TracePipe Contributors"}
+    {name = "Gauthier Piarrette"}
 ]
-keywords = ["ml", "data-lineage", "debugging", "mlops", "pandas", "numpy", "sklearn"]
+keywords = [
+    "data-lineage",
+    "pandas",
+    "data-engineering",
+    "data-quality",
+    "observability",
+    "debugging",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
+
 dependencies = [
-    "pandas>=2.0.0",
-    "numpy>=1.24.0",
-    "networkx>=3.0",
+    "pandas>=1.5.0",
+    "numpy>=1.20.0",
 ]
 
 [project.optional-dependencies]
-sklearn = ["scikit-learn>=1.3.0"]
-polars = ["polars>=0.20.0"]
-viz = ["jinja2>=3.0.0"]
-all = [
-    "scikit-learn>=1.3.0",
-    "polars>=0.20.0",
-    "jinja2>=3.0.0",
+arrow = [
+    "pyarrow>=10.0.0",
+]
+memory = [
+    "psutil>=5.9.0",
 ]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "ruff>=0.1.0",
+    "black>=23.0.0",
+    "taskipy>=1.12.0",
+    "pre-commit>=3.5.0",
+]
+all = [
+    "pyarrow>=10.0.0",
+    "psutil>=5.9.0",
 ]
 
 [project.urls]
 Homepage = "https://github.com/tracepipe/tracepipe"
-Documentation = "https://tracepipe.dev"
-Repository = "https://github.com/tracepipe/tracepipe"
+Documentation = "https://github.com/tracepipe/tracepipe#readme"
+Repository = "https://github.com/tracepipe/tracepipe.git"
+Issues = "https://github.com/tracepipe/tracepipe/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["tracepipe"]
 
-[tool.ruff]
-line-length = 100
-target-version = "py310"
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "W"]
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
 addopts = "-v --tb=short"
+
+[tool.black]
+line-length = 100
+target-version = ["py39"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+ignore = [
+    "E501",  # Line too long - handled by black, also embedded HTML/JS
+    "W291",  # Trailing whitespace - in embedded HTML/JS strings
+    "W293",  # Blank line contains whitespace - in embedded HTML/JS strings
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["F841"]  # Allow unused variables in tests (side effects matter)
+
+[tool.ruff.lint.isort]
+known-first-party = ["tracepipe"]
+
+[tool.coverage.run]
+source = ["tracepipe"]
+omit = ["tests/*"]
+
+[tool.taskipy.tasks]
+lint = "ruff check tracepipe/ tests/ && black --check tracepipe/ tests/"
+format = "black tracepipe/ tests/ && ruff check --fix tracepipe/ tests/"
+test = "pytest tests/ -v"
+test-cov = "pytest tests/ --cov=tracepipe --cov-report=term-missing"
+check = "task lint && task test"
