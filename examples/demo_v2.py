@@ -77,7 +77,7 @@ print(f"Dropped by operation: {dropped_by_step}")
 # 3. Examine a specific row's journey
 print("\n📖 Row 0 (Alice) journey:")
 row0 = tracepipe.explain(0)
-print(f"  Status: {'✓ alive' if row0.is_alive() else '✗ dropped'}")
+print(f"  Status: {'✓ alive' if row0.is_alive else '✗ dropped'}")
 print(f"  Events: {len(row0.history())}")
 for event in row0.history():
     if event["col"] == "__row__":
@@ -94,7 +94,7 @@ for event in row0.history():
 # 4. What happened to Bob (row 1)?
 print("\n📖 Row 1 (Bob) journey:")
 row1 = tracepipe.explain(1)
-print(f"  Status: {'✓ alive' if row1.is_alive() else '✗ dropped at ' + str(row1.dropped_at())}")
+print(f"  Status: {'✓ alive' if row1.is_alive else '✗ dropped at ' + str(row1.dropped_at)}")
 
 # 5. Aggregation group lineage
 print("\n👥 Engineering group membership:")

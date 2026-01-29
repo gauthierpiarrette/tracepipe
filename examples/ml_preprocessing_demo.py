@@ -261,15 +261,15 @@ if dropped:
     dropped_id = dropped[0]
     dropped_row = tracepipe.explain(dropped_id)
     print(f"\n  Dropped Row #{dropped_id}:")
-    print(f"    Status: {'Alive' if dropped_row.is_alive() else 'DROPPED'}")
-    print(f"    Dropped at: {dropped_row.dropped_at()}")
+    print(f"    Status: {'Alive' if dropped_row.is_alive else 'DROPPED'}")
+    print(f"    Dropped at: {dropped_row.dropped_at}")
 
 # Find a row that survived with changes
 all_row_ids = set(range(n_customers))
 survived_with_changes = []
 for rid in list(all_row_ids - set(dropped))[:50]:  # Check first 50 survivors
     row = tracepipe.explain(rid)
-    if row.is_alive() and len(row.history()) > 0:
+    if row.is_alive and len(row.history()) > 0:
         # Filter to only actual value changes (not __row__ events)
         value_changes = [h for h in row.history() if h["col"] not in ("__row__", "__position__")]
         if value_changes:
@@ -334,7 +334,7 @@ if len(high_risk) > 0:
     # Find this customer's row ID
     for rid in range(min(n_customers, 100)):
         row = tracepipe.explain(rid)
-        if row.is_alive():
+        if row.is_alive:
             history = row.history()
             if history:
                 print(f"   Row {rid} transformations:")

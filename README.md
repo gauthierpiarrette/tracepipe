@@ -192,8 +192,8 @@ tracepipe.export_arrow("lineage.parquet")
 
 | Method | Description |
 |--------|-------------|
-| `.is_alive()` | True if row wasn't dropped |
-| `.dropped_at()` | Operation that dropped the row |
+| `.is_alive` | True if row wasn't dropped (property) |
+| `.dropped_at` | Operation that dropped the row (property) |
 | `.history()` | Full event history |
 | `.cell_history(col)` | Changes to specific column |
 | `.gaps` | Lineage completeness info |
