@@ -1,8 +1,6 @@
-"""
-Instrumentation modules for automatic lineage capture.
-"""
-from tracepipe.instrumentation.pandas_inst import instrument_pandas
-from tracepipe.instrumentation.numpy_inst import instrument_numpy
-from tracepipe.instrumentation.sklearn_inst import instrument_sklearn
+# tracepipe/instrumentation/__init__.py
+"""Instrumentation for various data processing libraries."""
 
-__all__ = ["instrument_pandas", "instrument_numpy", "instrument_sklearn"]
+from .pandas_inst import instrument_pandas, uninstrument_pandas
+
+__all__ = ["instrument_pandas", "uninstrument_pandas"]
