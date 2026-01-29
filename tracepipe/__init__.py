@@ -1,133 +1,110 @@
+# tracepipe/__init__.py
 """
-TracePipe: Automatic data lineage & debugging for ML pipelines.
+TracePipe: Row-Level Data Lineage Tracking
 
-Usage:
+Track every row, every change, every step in your pandas pipelines.
+
+Quick Start:
     import tracepipe
-    tracepipe.enable()  # Instruments pandas, numpy, sklearn automatically
-    
-    # Your ML pipeline code here...
-    df = pd.read_csv("data.csv")
-    df = df.fillna(0)
-    
-    # Explain what happened
-    lineage = tracepipe.explain(df)
-    lineage.show()  # Opens interactive HTML visualization
-"""
-from tracepipe.core import (
-    LineageGraph,
-    LineageNode,
-    DataSnapshot,
-    OperationType,
-    get_context,
-    get_graph,
-    stage,
-)
-from tracepipe.api import (
-    explain,
-    get_lineage,
-    summary,
-    print_summary,
-    LineageResult,
-)
-from tracepipe.export import (
-    export_to_json,
-    export_to_openlineage,
-    LineageExporter,
-)
-from tracepipe.visualization import (
-    LineageVisualizer,
-    render_lineage_html,
-)
+    import pandas as pd
 
-__version__ = "1.0.0"
+    tracepipe.enable()
+    tracepipe.watch("age", "salary")  # Watch specific columns
+
+    df = pd.DataFrame({"age": [25, None, 35], "salary": [50000, 60000, None]})
+    df = df.dropna()
+    df["salary"] = df["salary"] * 1.1
+
+    # Query lineage
+    row = tracepipe.explain(0)  # What happened to row 0?
+    print(row.history())
+
+    dropped = tracepipe.dropped_rows()  # Which rows were dropped?
+    print(dropped)
+
+Features:
+    - Row-level tracking: Know exactly which rows were dropped and why
+    - Cell-level diffs: See before/after values for watched columns
+    - Aggregation lineage: Trace back from grouped results to source rows
+    - Zero-copy design: Minimal overhead on your pipelines
+    - Safe instrumentation: Never crashes your code
+
+See IMPLEMENTATION_PLAN_v5.md for full documentation.
+"""
+
+from .api import (
+    GroupLineageResult,
+    # Result classes
+    RowLineageResult,
+    aggregation_groups,
+    # Convenience functions
+    alive_rows,
+    clear_watch,
+    configure,
+    disable,
+    dropped_rows,
+    # Core control
+    enable,
+    # Query API
+    explain,
+    explain_group,
+    explain_many,
+    export_arrow,
+    # Export
+    export_json,
+    mass_updates,
+    register,
+    reset,
+    stage,
+    stats,
+    steps,
+    unwatch,
+    # Column watching
+    watch,
+    watch_all,
+)
+from .core import TracePipeConfig
+
+# Export protocols for custom backend implementers
+from .storage.base import LineageBackend, RowIdentityStrategy
+from .visualization.html_export import save
+
+__version__ = "0.2.0"
+
 __all__ = [
+    # Core API
     "enable",
     "disable",
     "reset",
+    "configure",
+    "watch",
+    "watch_all",
+    "unwatch",
+    "clear_watch",
+    "register",
     "stage",
+    # Query API
     "explain",
-    "get_lineage",
-    "summary",
-    "print_summary",
-    "export_to_json",
-    "export_to_openlineage",
-    "LineageResult",
-    "LineageGraph",
-    "LineageNode",
-    "DataSnapshot",
-    "LineageVisualizer",
-    "LineageExporter",
-    "OperationType",
-    "get_graph",
+    "explain_many",
+    "explain_group",
+    "dropped_rows",
+    "alive_rows",
+    "mass_updates",
+    "steps",
+    "aggregation_groups",
+    # Export
+    "export_json",
+    "export_arrow",
+    "stats",
+    "save",
+    # Configuration
+    "TracePipeConfig",
+    # Result classes
+    "RowLineageResult",
+    "GroupLineageResult",
+    # Protocols (for custom backends)
+    "LineageBackend",
+    "RowIdentityStrategy",
+    # Version
+    "__version__",
 ]
-
-
-def enable(
-    pandas: bool = True,
-    numpy: bool = False,
-    sklearn: bool = True,
-) -> None:
-    """
-    Enable tracepipe lineage tracking.
-    
-    This instruments pandas and sklearn (if available) to automatically
-    capture data transformations. Call this at the start of your script.
-    
-    Note: numpy instrumentation is disabled by default because pandas
-    internally calls many numpy functions, creating noise. Enable it
-    explicitly if you need to track standalone numpy operations.
-    
-    Args:
-        pandas: Instrument pandas DataFrame operations (default: True)
-        numpy: Instrument numpy array operations (default: False - creates noise)
-        sklearn: Instrument sklearn transformers and models (default: True)
-    
-    Example:
-        >>> import tracepipe
-        >>> tracepipe.enable()
-        >>> # Now all DataFrame operations are tracked
-        >>> df = pd.DataFrame({"a": [1, 2, 3]})
-        >>> df = df.fillna(0)
-    """
-    ctx = get_context()
-    ctx.enable()
-    
-    if pandas:
-        from tracepipe.instrumentation import instrument_pandas
-        instrument_pandas()
-    
-    if numpy:
-        from tracepipe.instrumentation import instrument_numpy
-        instrument_numpy()
-    
-    if sklearn:
-        try:
-            from tracepipe.instrumentation import instrument_sklearn
-            instrument_sklearn()
-        except ImportError:
-            pass
-
-
-def disable() -> None:
-    """
-    Disable tracepipe lineage tracking.
-    
-    This stops capturing new operations but preserves the existing lineage graph.
-    Use reset() to also clear the graph.
-    """
-    get_context().disable()
-
-
-def reset() -> None:
-    """
-    Reset tracepipe state.
-    
-    This clears all captured lineage data and resets the stage stack.
-    Does not uninstrument pandas/numpy/sklearn.
-    """
-    get_context().reset()
-
-
-def is_enabled() -> bool:
-    """Check if tracepipe lineage tracking is currently enabled."""
-    return get_context().enabled
