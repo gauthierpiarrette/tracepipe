@@ -1,187 +1,89 @@
+# tests/test_core.py
 """
-Tests for tracepipe core functionality.
+Tests for tracepipe/core.py - Configuration, enums, and dataclasses.
 """
-import pytest
-import numpy as np
-import pandas as pd
 
-import tracepipe
-from tracepipe.core import (
-    DataSnapshot,
-    LineageGraph,
-    LineageNode,
-    OperationType,
-    get_context,
-    get_graph,
-    stage,
-)
+from tracepipe import TracePipeConfig
+from tracepipe.core import ChangeType, CompletenessLevel, LineageGap, LineageGaps
 
 
-class TestDataSnapshot:
-    def test_from_dataframe(self):
-        df = pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]})
-        snapshot = DataSnapshot.from_dataframe(df)
-        
-        assert snapshot.shape == (3, 2)
-        assert "a" in snapshot.dtypes
-        assert "b" in snapshot.dtypes
-        assert snapshot.columns == ["a", "b"]
-        assert snapshot.sample_rows is not None
-        assert len(snapshot.sample_rows) == 3
-        assert snapshot.checksum is not None
+class TestTracePipeConfig:
+    """Tests for TracePipeConfig."""
 
-    def test_from_ndarray(self):
-        arr = np.array([[1, 2], [3, 4], [5, 6]])
-        snapshot = DataSnapshot.from_ndarray(arr)
-        
-        assert snapshot.shape == (3, 2)
-        assert "array" in snapshot.dtypes
-        assert snapshot.memory_bytes == arr.nbytes
-        assert snapshot.checksum is not None
+    def test_default_values(self):
+        """Default config has sensible values."""
+        config = TracePipeConfig()
 
-    def test_empty_dataframe(self):
-        df = pd.DataFrame()
-        snapshot = DataSnapshot.from_dataframe(df)
-        
-        assert snapshot.shape == (0, 0)
-        assert snapshot.columns == []
+        assert config.max_diffs_in_memory == 500_000
+        assert config.max_diffs_per_step == 100_000
+        assert config.strict_mode is False
+        assert config.auto_watch is False
 
-
-class TestLineageGraph:
-    def setup_method(self):
-        tracepipe.reset()
-
-    def test_add_node(self):
-        graph = LineageGraph()
-        df = pd.DataFrame({"a": [1, 2, 3]})
-        
-        node_id = graph.add_node(
-            operation=OperationType.CREATE,
-            operation_name="test_create",
-            output_data=df,
+    def test_custom_values(self):
+        """Config accepts custom values."""
+        config = TracePipeConfig(
+            max_diffs_in_memory=1000,
+            strict_mode=True,
+            auto_watch=True,
         )
-        
-        assert node_id is not None
-        assert len(node_id) == 8
-        
-        node = graph.get_node(node_id)
-        assert node is not None
-        assert node.operation == OperationType.CREATE
-        assert node.operation_name == "test_create"
 
-    def test_node_linking(self):
-        graph = LineageGraph()
-        df1 = pd.DataFrame({"a": [1, 2, 3]})
-        
-        node1_id = graph.add_node(
-            operation=OperationType.CREATE,
-            operation_name="create",
-            output_data=df1,
-        )
-        
-        df2 = df1.copy()
-        node2_id = graph.add_node(
-            operation=OperationType.COPY,
-            operation_name="copy",
-            input_data=df1,
-            output_data=df2,
-        )
-        
-        node2 = graph.get_node(node2_id)
-        assert node1_id in node2.parent_ids
+        assert config.max_diffs_in_memory == 1000
+        assert config.strict_mode is True
+        assert config.auto_watch is True
 
-    def test_get_lineage(self):
-        graph = LineageGraph()
-        
-        node1_id = graph.add_node(
-            operation=OperationType.CREATE,
-            operation_name="step1",
-        )
-        
-        node2_id = graph.add_node(
-            operation=OperationType.TRANSFORM,
-            operation_name="step2",
-            parent_ids=[node1_id],
-        )
-        
-        node3_id = graph.add_node(
-            operation=OperationType.TRANSFORM,
-            operation_name="step3",
-            parent_ids=[node2_id],
-        )
-        
-        lineage = graph.get_lineage(node3_id)
-        assert len(lineage) == 3
-        
-        lineage = graph.get_lineage(node1_id)
-        assert len(lineage) == 1
+    def test_from_env(self, monkeypatch):
+        """TracePipeConfig.from_env() reads environment variables."""
+        monkeypatch.setenv("TRACEPIPE_MAX_DIFFS", "1000")
+        monkeypatch.setenv("TRACEPIPE_STRICT", "1")
+
+        config = TracePipeConfig.from_env()
+
+        assert config.max_diffs_in_memory == 1000
+        assert config.strict_mode is True
 
 
-class TestStageContext:
-    def setup_method(self):
-        tracepipe.reset()
+class TestEnums:
+    """Tests for enum types."""
 
-    def test_stage_context(self):
-        ctx = get_context()
-        
-        assert ctx.current_stage is None
-        
-        with stage("preprocessing"):
-            assert ctx.current_stage == "preprocessing"
-            
-            with stage("normalization"):
-                assert ctx.current_stage == "normalization"
-            
-            assert ctx.current_stage == "preprocessing"
-        
-        assert ctx.current_stage is None
+    def test_change_type_values(self):
+        """ChangeType enum has expected values."""
+        assert ChangeType.MODIFIED == 0
+        assert ChangeType.DROPPED == 1
+        assert ChangeType.ADDED == 2
+        assert ChangeType.REORDERED == 3
 
-    def test_nested_stages(self):
-        ctx = get_context()
-        
-        ctx.push_stage("a")
-        ctx.push_stage("b")
-        ctx.push_stage("c")
-        
-        assert ctx.current_stage == "c"
-        
-        ctx.pop_stage()
-        assert ctx.current_stage == "b"
-        
-        ctx.pop_stage()
-        assert ctx.current_stage == "a"
+    def test_completeness_level_values(self):
+        """CompletenessLevel enum has expected values."""
+        assert CompletenessLevel.FULL == 0
+        assert CompletenessLevel.PARTIAL == 1
+        assert CompletenessLevel.UNKNOWN == 2
 
 
-class TestTracePipeContext:
-    def setup_method(self):
-        tracepipe.reset()
+class TestLineageGaps:
+    """Tests for LineageGaps dataclass."""
 
-    def test_enable_disable(self):
-        ctx = get_context()
-        
-        assert not ctx.enabled
-        
-        ctx.enable()
-        assert ctx.enabled
-        
-        ctx.disable()
-        assert not ctx.enabled
+    def test_empty_gaps(self):
+        """Empty gaps indicate full tracking."""
+        gaps = LineageGaps(gaps=[])
 
-    def test_reset(self):
-        ctx = get_context()
-        graph = get_graph()
-        
-        ctx.enable()
-        ctx.push_stage("test")
-        graph.add_node(
-            operation=OperationType.CREATE,
-            operation_name="test",
-        )
-        
-        assert ctx.current_stage == "test"
-        assert len(graph.get_all_nodes()) == 1
-        
-        ctx.reset()
-        
-        assert ctx.current_stage is None
-        assert len(graph.get_all_nodes()) == 0
+        assert gaps.is_fully_tracked is True
+        assert gaps.has_gaps is False
+        assert gaps.summary() == "Fully tracked"
+
+    def test_single_gap(self):
+        """Single gap is reported correctly."""
+        gap = LineageGap(step_id=1, operation="apply", reason="Custom function")
+        gaps = LineageGaps(gaps=[gap])
+
+        assert gaps.is_fully_tracked is False
+        assert gaps.has_gaps is True
+        assert "1 step" in gaps.summary()
+
+    def test_multiple_gaps(self):
+        """Multiple gaps are reported correctly."""
+        gap1 = LineageGap(step_id=1, operation="apply", reason="Custom function")
+        gap2 = LineageGap(step_id=2, operation="merge", reason="Lineage reset")
+        gaps = LineageGaps(gaps=[gap1, gap2])
+
+        assert gaps.has_gaps is True
+        assert "2 steps" in gaps.summary()
