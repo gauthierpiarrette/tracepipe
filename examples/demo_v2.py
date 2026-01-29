@@ -71,7 +71,7 @@ dropped = tracepipe.dropped_rows()
 print(f"\n❌ Dropped row IDs: {dropped}")
 
 # 2. Where were they dropped?
-dropped_by_step = tracepipe.dropped_rows_by_step()
+dropped_by_step = tracepipe.dropped_rows(by_step=True)
 print(f"Dropped by operation: {dropped_by_step}")
 
 # 3. Examine a specific row's journey
