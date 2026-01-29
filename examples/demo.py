@@ -4,9 +4,9 @@ TracePipe Demo - Complete ML Pipeline with Lineage Tracking
 
 Run: python examples/demo.py
 """
-import tracepipe
 import pandas as pd
-import numpy as np
+
+import tracepipe
 
 tracepipe.enable()
 
@@ -14,13 +14,15 @@ print("=" * 60)
 print("TracePipe v1.0.0 Demo - ML Pipeline Lineage Tracking")
 print("=" * 60)
 
-df = pd.DataFrame({
-    "user_id": [1, 2, 3, 4, 5],
-    "age": [25, None, 35, 45, 28],
-    "income": [50000, 60000, None, 80000, 55000],
-    "category": ["A", "B", "A", "B", "A"],
-    "purchase_amount": [100, 250, None, 400, 150],
-})
+df = pd.DataFrame(
+    {
+        "user_id": [1, 2, 3, 4, 5],
+        "age": [25, None, 35, 45, 28],
+        "income": [50000, 60000, None, 80000, 55000],
+        "category": ["A", "B", "A", "B", "A"],
+        "purchase_amount": [100, 250, None, 400, 150],
+    }
+)
 
 print("\n📥 Raw data loaded:")
 print(df)
@@ -31,18 +33,20 @@ with tracepipe.stage("data_cleaning"):
     print(f"\n🧹 After cleaning: {len(df)} rows")
 
 with tracepipe.stage("feature_engineering"):
-    df["age_bucket"] = pd.cut(df["age"], bins=[0, 30, 50, 100], labels=["young", "middle", "senior"])
+    df["age_bucket"] = pd.cut(
+        df["age"], bins=[0, 30, 50, 100], labels=["young", "middle", "senior"]
+    )
     df["income_normalized"] = df["income"] / df["income"].max()
     df["purchase_ratio"] = df["purchase_amount"] / df["income"]
     print(f"\n🔧 Features added: {list(df.columns)}")
 
 with tracepipe.stage("aggregation"):
-    summary = df.groupby("category").agg({
-        "income": "mean",
-        "purchase_amount": "sum",
-        "age": "mean"
-    }).reset_index()
-    print(f"\n📊 Summary by category:")
+    summary = (
+        df.groupby("category")
+        .agg({"income": "mean", "purchase_amount": "sum", "age": "mean"})
+        .reset_index()
+    )
+    print("\n📊 Summary by category:")
     print(summary)
 
 lineage = tracepipe.explain()
