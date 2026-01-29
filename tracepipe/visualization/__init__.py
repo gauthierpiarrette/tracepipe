@@ -1,6 +1,6 @@
-"""
-Visualization modules for lineage display.
-"""
-from tracepipe.visualization.html_viz import LineageVisualizer, render_lineage_html
+# tracepipe/visualization/__init__.py
+"""Visualization exports for TracePipe."""
 
-__all__ = ["LineageVisualizer", "render_lineage_html"]
+from .html_export import save
+
+__all__ = ["save"]
