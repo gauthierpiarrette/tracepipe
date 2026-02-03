@@ -5,106 +5,145 @@ TracePipe: Row-Level Data Lineage Tracking
 Track every row, every change, every step in your pandas pipelines.
 
 Quick Start:
-    import tracepipe
+    import tracepipe as tp
     import pandas as pd
 
-    tracepipe.enable()
-    tracepipe.watch("age", "salary")  # Watch specific columns
+    tp.enable(mode="debug", watch=["age", "salary"])
 
     df = pd.DataFrame({"age": [25, None, 35], "salary": [50000, 60000, None]})
     df = df.dropna()
     df["salary"] = df["salary"] * 1.1
 
-    # Query lineage
-    row = tracepipe.explain(0)  # What happened to row 0?
-    print(row.history())
+    # Health audit
+    result = tp.check(df)
+    print(result)
 
-    dropped = tracepipe.dropped_rows()  # Which rows were dropped?
-    print(dropped)
+    # Row journey
+    trace = tp.trace(df, row=0)
+    print(trace)
 
-Features:
-    - Row-level tracking: Know exactly which rows were dropped and why
-    - Cell-level diffs: See before/after values for watched columns
-    - Aggregation lineage: Trace back from grouped results to source rows
-    - Zero-copy design: Minimal overhead on your pipelines
-    - Safe instrumentation: Never crashes your code
+    # Cell provenance
+    why = tp.why(df, col="salary", row=0)
+    print(why)
 
-See IMPLEMENTATION_PLAN_v5.md for full documentation.
+    # Generate report
+    tp.report(df, "audit.html")
+
+Modes:
+    - CI mode (default): Step stats, retention rates, merge mismatch detection.
+      No per-row provenance. Fast for production.
+    - DEBUG mode: Full per-row provenance, cell history, ghost values.
+
+API Summary:
+    Core (5 functions for 90% of use cases):
+        tp.enable()   - Start tracking
+        tp.check()    - Health audit → CheckResult
+        tp.trace()    - Row journey → TraceResult
+        tp.why()      - Cell provenance → WhyResult
+        tp.report()   - HTML export
+
+    Power features (via namespaces):
+        tp.debug.inspect()           - Raw lineage access
+        tp.contracts.contract()      - Data quality contracts
+        tp.snapshot(), tp.diff()     - Pipeline state comparison
+
+    All functions return structured result objects.
+    Use print(result) for pretty output, result.to_dict() for data.
 """
 
-from .api import (
-    GroupLineageResult,
-    # Result classes
-    RowLineageResult,
-    aggregation_groups,
-    # Convenience functions
-    alive_rows,
-    clear_watch,
-    configure,
-    disable,
-    dropped_rows,
-    # Core control
-    enable,
-    # Query API
-    explain,
-    explain_group,
-    explain_many,
-    export_arrow,
-    # Export
-    export_json,
-    mass_updates,
-    register,
-    reset,
-    stage,
-    stats,
-    steps,
-    unwatch,
-    # Column watching
-    watch,
-    watch_all,
+# === CORE API (6 functions) ===
+# === NAMESPACES ===
+from . import contracts, debug
+from .api import configure, disable, enable, register, reset, stage
+
+# Re-export contract() at top level for convenience
+from .contracts import contract
+
+# === CONVENIENCE API (user-facing) ===
+from .convenience import (
+    CheckFailed,
+    # Result types
+    CheckResult,
+    CheckWarning,
+    TraceResult,
+    WhyResult,
+    check,
+    find,
+    report,
+    trace,
+    why,
 )
-from .core import TracePipeConfig
 
-# Export protocols for custom backend implementers
-from .storage.base import LineageBackend, RowIdentityStrategy
-from .visualization.html_export import save
+# === CONFIGURATION ===
+from .core import TracePipeConfig, TracePipeMode
 
-__version__ = "0.2.0"
+# === SNAPSHOTS (top-level for convenience) ===
+from .snapshot import DiffResult, Snapshot, diff, snapshot
 
+# === VERSION ===
+__version__ = "0.3.0"
+
+# === MINIMAL __all__ ===
 __all__ = [
-    # Core API
+    # Core control (6)
     "enable",
     "disable",
     "reset",
-    "configure",
-    "watch",
-    "watch_all",
-    "unwatch",
-    "clear_watch",
     "register",
     "stage",
-    # Query API
-    "explain",
-    "explain_many",
-    "explain_group",
-    "dropped_rows",
-    "alive_rows",
-    "mass_updates",
-    "steps",
-    "aggregation_groups",
-    # Export
-    "export_json",
-    "export_arrow",
-    "stats",
-    "save",
-    # Configuration
+    "configure",
+    # Convenience API (5)
+    "check",
+    "find",
+    "trace",
+    "why",
+    "report",
+    # Result types (5)
+    "CheckResult",
+    "CheckWarning",
+    "CheckFailed",
+    "TraceResult",
+    "WhyResult",
+    # Snapshots (4)
+    "snapshot",
+    "diff",
+    "Snapshot",
+    "DiffResult",
+    # Contracts (1)
+    "contract",
+    # Namespaces (2)
+    "debug",
+    "contracts",
+    # Config (2)
     "TracePipeConfig",
-    # Result classes
-    "RowLineageResult",
-    "GroupLineageResult",
-    # Protocols (for custom backends)
-    "LineageBackend",
-    "RowIdentityStrategy",
-    # Version
+    "TracePipeMode",
+    # Version (1)
     "__version__",
 ]
+
+
+def __dir__():
+    """Control what shows up in IDE autocomplete - only essential functions."""
+    return [
+        # Primary API
+        "enable",
+        "disable",
+        "reset",
+        "register",
+        "configure",
+        "check",
+        "find",
+        "trace",
+        "why",
+        "report",
+        # Snapshots
+        "snapshot",
+        "diff",
+        # Contract
+        "contract",
+        # Namespaces
+        "debug",
+        "contracts",
+        # Config
+        "TracePipeConfig",
+    ]
