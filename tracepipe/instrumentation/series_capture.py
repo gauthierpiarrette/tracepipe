@@ -116,6 +116,10 @@ def wrap_series_assignment():
     """
     Wrap DataFrame.__setitem__ to capture diffs when assigning Series.
 
+    Note: For watched columns, _wrap_setitem (pandas_inst.py) already captures
+    the assignment. This wrapper only captures for NON-watched columns when
+    a TrackedSeries is assigned, to avoid double-logging.
+
     Handles:
     - df['col'] = series  (where series may have been modified)
     - df['col'] = scalar  (broadcast assignment)
@@ -127,28 +131,33 @@ def wrap_series_assignment():
     def tracked_setitem(self, key, value):
         ctx = get_context()
 
-        # Capture before state for watched columns
+        # For watched columns, _wrap_setitem already captures - skip to avoid double-logging
+        # We only capture here for NON-watched columns when a TrackedSeries is involved
+        should_capture_here = False
         before_values = None
+
         if (
             ctx.enabled
             and isinstance(key, str)
-            and key in ctx.watched_columns
             and key in self.columns
+            and key not in ctx.watched_columns  # Only capture NON-watched columns here
+            and isinstance(value, TrackedSeries)  # Only for TrackedSeries assignments
         ):
             rids = ctx.row_manager.get_ids_array(self)
             if rids is not None:
+                should_capture_here = True
                 before_values = {
                     "rids": rids.copy(),
                     "values": self[key].values.copy(),
                 }
 
-        # Always run original
+        # Always run original (which may be _wrap_setitem's wrapper)
         original_setitem(self, key, value)
 
         if not ctx.enabled:
             return
 
-        if before_values is None:
+        if not should_capture_here or before_values is None:
             return
 
         try:

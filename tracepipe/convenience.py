@@ -361,8 +361,8 @@ def check(
     facts["rows_dropped"] = len(dropped)
     facts["total_steps"] = len(ctx.store.steps)
 
-    # Merge statistics
-    merge_stats_list = ctx.store.get_merge_stats() if hasattr(ctx.store, "get_merge_stats") else []
+    # Merge statistics - filter to df's lineage to avoid cross-contamination
+    merge_stats_list = _get_merge_stats_for_df(df, ctx)
 
     for i, (step_id, stats) in enumerate(merge_stats_list):
         facts[f"merge_{i}_expansion"] = stats.expansion_ratio
@@ -656,6 +656,53 @@ def find(
 
 
 # ============ HELPERS ============
+
+
+def _get_merge_stats_for_df(df: pd.DataFrame, ctx) -> list[tuple[int, Any]]:
+    """
+    Get merge stats relevant to df's lineage only.
+
+    This prevents cross-contamination where check(df) would show warnings
+    from merges that produced OTHER DataFrames in the same session.
+    """
+    if not hasattr(ctx.store, "get_merge_stats"):
+        return []
+
+    all_stats = ctx.store.get_merge_stats()
+    if not all_stats:
+        return []
+
+    # Get row IDs from df
+    rids = ctx.row_manager.get_ids_array(df)
+    if rids is None:
+        return []
+
+    # Find which merge steps produced rows in df
+    relevant_step_ids = set()
+
+    # Check merge mappings to find which merges produced df's rows
+    if hasattr(ctx.store, "merge_mappings"):
+        for mapping in ctx.store.merge_mappings:
+            # Check if any of df's row IDs are in this merge's output
+            for rid in rids:
+                # Binary search in sorted out_rids
+                i = np.searchsorted(mapping.out_rids, rid)
+                if i < len(mapping.out_rids) and mapping.out_rids[i] == rid:
+                    relevant_step_ids.add(mapping.step_id)
+                    break  # Found at least one match, this merge is relevant
+
+    # If no merge mappings found, fall back to checking if df was just merged
+    # by seeing if it has more columns than typical (heuristic)
+    if not relevant_step_ids and all_stats:
+        # Fallback: return only the most recent merge that could have produced df
+        # This handles the case where merge_mappings aren't available
+        for step_id, stats in reversed(all_stats):
+            if stats.result_rows == len(df):
+                relevant_step_ids.add(step_id)
+                break
+
+    # Filter stats to relevant merges only
+    return [(sid, stats) for sid, stats in all_stats if sid in relevant_step_ids]
 
 
 def _json_safe(val: Any) -> Any:

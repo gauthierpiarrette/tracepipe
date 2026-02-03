@@ -5,6 +5,19 @@ All notable changes to TracePipe will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.3.3 - 2026-02-03
+
+### Fixed
+- **Double-logging bug**: `df['col'] = df['col'].fillna()` now logs exactly one event, not two
+  - Fixed duplicate capture from both `_wrap_setitem` and `wrap_series_assignment`
+- **Merge warning scoping**: `tp.check(df)` now only shows warnings for merges in df's lineage
+  - Previously showed warnings from ALL merges in the session (cross-contamination)
+  - Now filters by tracking which merge steps produced the queried DataFrame's rows
+
+### Added
+- `_get_merge_stats_for_df()` helper to scope merge warnings to df's lineage
+- Tests for double-logging prevention and merge warning scoping
+
 ## 0.3.2 - 2026-02-03
 
 ### Fixed

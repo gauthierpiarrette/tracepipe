@@ -318,6 +318,79 @@ class TestMergeWarningLabeling:
         )
 
 
+class TestNoDoubleLogging:
+    """Tests to verify no duplicate events are logged."""
+
+    def test_fillna_logs_once_not_twice(self):
+        """df['col'] = df['col'].fillna() should log exactly one event per row."""
+        tp.enable(mode="debug", watch=["income"])
+
+        df = pd.DataFrame({"id": [1], "income": [None]})
+        df["income"] = df["income"].fillna(0)
+
+        result = tp.why(df, col="income", row=0)
+
+        # Should have exactly 1 change event, not 2 (no double-logging)
+        assert result.n_changes == 1, (
+            f"Expected exactly 1 change event, got {result.n_changes}. "
+            f"Double-logging bug if > 1. History: {result.history}"
+        )
+
+    def test_setitem_logs_once(self):
+        """Direct column assignment should log exactly once."""
+        tp.enable(mode="debug", watch=["val"])
+
+        df = pd.DataFrame({"id": [1], "val": [10]})
+        df["val"] = df["val"] * 2
+
+        result = tp.why(df, col="val", row=0)
+
+        assert result.n_changes == 1, (
+            f"Expected exactly 1 change event, got {result.n_changes}. "
+            f"History: {result.history}"
+        )
+
+
+class TestMergeWarningScoping:
+    """Tests for merge warnings being scoped to df's lineage."""
+
+    def test_check_only_shows_warnings_for_df_lineage(self):
+        """check(df) should only show warnings from merges that produced df."""
+        tp.enable(mode="debug")
+
+        # First pipeline - merge with unique right
+        left1 = pd.DataFrame({"k": ["a", "a", "b"], "v": [1, 2, 3]})  # Dup left
+        right1 = pd.DataFrame({"k": ["a", "b", "c"], "r": [10, 20, 30]})  # Unique
+        df1 = left1.merge(right1, on="k", how="left")
+
+        # Second pipeline - merge with duplicate right
+        left2 = pd.DataFrame({"k": ["x", "y"], "v": [1, 2]})  # Unique
+        right2 = pd.DataFrame({"k": ["x", "x", "y"], "r": [10, 11, 20]})  # Dup right
+        df2 = left2.merge(right2, on="k", how="left")
+
+        # check(df1) should only show warnings about LEFT duplicates (from df1's merge)
+        result1 = tp.check(df1)
+        dup_warnings1 = [w for w in result1.warnings if "duplicate" in w.message.lower()]
+
+        # check(df2) should only show warnings about RIGHT duplicates (from df2's merge)
+        result2 = tp.check(df2)
+        dup_warnings2 = [w for w in result2.warnings if "duplicate" in w.message.lower()]
+
+        # df1's check should NOT include df2's "Right table" warning
+        right_in_df1 = [w for w in dup_warnings1 if "right" in w.message.lower()]
+        assert len(right_in_df1) == 0, (
+            f"df1 check should not have Right table warnings (from df2). "
+            f"Got: {[w.message for w in dup_warnings1]}"
+        )
+
+        # df2's check should NOT include df1's "Left table" warning
+        left_in_df2 = [w for w in dup_warnings2 if "left" in w.message.lower()]
+        assert len(left_in_df2) == 0, (
+            f"df2 check should not have Left table warnings (from df1). "
+            f"Got: {[w.message for w in dup_warnings2]}"
+        )
+
+
 class TestLineageDepthLimit:
     """Tests for lineage traversal depth limiting."""
 
