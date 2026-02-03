@@ -113,7 +113,7 @@ jobs:
         run: uv sync --all-extras
 
       - name: Run demo
-        run: uv run python examples/demo_v2.py
+        run: uv run python examples/demo.py
 
   build:
     name: Build Package
