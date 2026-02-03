@@ -5,6 +5,18 @@ All notable changes to TracePipe will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.3.1 - 2026-02-03
+
+### Fixed
+- Cell history now correctly chains through merge operations via lineage traversal
+- `tp.why()` and `tp.trace()` show pre-merge changes for post-merge rows
+- `enable()` resets accumulated state when called multiple times (fixes duplicate warnings in notebooks/IDEs)
+
+### Added
+- `get_row_history_with_lineage()` and `get_cell_history_with_lineage()` methods for lineage-aware queries
+- `follow_lineage` parameter in `explain_value()` for opt-out of lineage traversal
+- Integration tests for cell provenance through merge operations
+
 ## 0.3.0 - 2026-02-03
 
 ### Added
