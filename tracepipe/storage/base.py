@@ -137,15 +137,19 @@ class RowIdentityStrategy(Protocol):
         ...
 
     def get_ids(self, df: Any) -> Optional[Any]:
-        """Get row IDs for a DataFrame, or None if not tracked."""
+        """Get row IDs as Series for a DataFrame, or None if not tracked."""
+        ...
+
+    def get_ids_array(self, df: Any) -> Optional[Any]:
+        """Get row IDs as numpy array for a DataFrame, or None if not tracked."""
         ...
 
     def propagate(self, source_df: Any, result_df: Any) -> Optional[Any]:
         """Propagate row IDs from source to result DataFrame."""
         ...
 
-    def get_dropped_ids(self, source_df: Any, result_df: Any) -> set:
-        """Get row IDs that were dropped between source and result."""
+    def get_dropped_ids(self, source_df: Any, result_df: Any) -> Any:
+        """Get row IDs that were dropped between source and result (as numpy array)."""
         ...
 
     def strip_hidden_column(self, df: Any) -> Any:
