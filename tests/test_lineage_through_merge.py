@@ -61,9 +61,9 @@ class TestCellProvenanceThroughMerge:
         # Query post-merge row for C2
         result = tp.why(df, col="income", where={"id": "C2"})
 
-        # CRITICAL: The fillna change should be visible!
-        assert result.n_changes >= 1, (
-            f"Pre-merge fillna change should be tracked, got {result.n_changes} changes. "
+        # CRITICAL: The fillna change should be visible - exactly 1 change
+        assert result.n_changes == 1, (
+            f"Pre-merge fillna should track exactly 1 change, got {result.n_changes}. "
             f"History: {result.history}"
         )
 
@@ -131,10 +131,10 @@ class TestCellProvenanceThroughMerge:
 
         result = tp.why(df, col="amount", where={"id": 1})
 
-        # Should still see the original fillna change
+        # Should still see exactly the original fillna change
         assert (
-            result.n_changes >= 1
-        ), f"Change should survive 2 merges, got {result.n_changes} changes"
+            result.n_changes == 1
+        ), f"Exactly 1 change should survive 2 merges, got {result.n_changes}"
 
     def test_merge_origin_still_captured(self):
         """Merge origin info should still be available alongside history."""
@@ -234,8 +234,8 @@ class TestFillnaTrackingVerification:
         # Verify TracePipe tracked it
         result = tp.why(df, col="a", row=1)
         assert (
-            result.n_changes >= 1
-        ), f"Series.fillna + assignment should be tracked, got {result.n_changes} changes"
+            result.n_changes == 1
+        ), f"Series.fillna + assignment should track exactly 1 change, got {result.n_changes}"
 
     def test_dataframe_fillna_tracked(self):
         """df.fillna({'col': val}) should be tracked."""
@@ -246,8 +246,8 @@ class TestFillnaTrackingVerification:
 
         result = tp.why(df, col="a", row=1)
         assert (
-            result.n_changes >= 1
-        ), f"DataFrame.fillna should be tracked, got {result.n_changes} changes"
+            result.n_changes == 1
+        ), f"DataFrame.fillna should track exactly 1 change, got {result.n_changes}"
 
     def test_dataframe_fillna_logs_once_not_twice(self):
         """df.fillna({'col': val}) should log exactly 1 event, not 2.
@@ -275,8 +275,8 @@ class TestFillnaTrackingVerification:
 
         result = tp.why(df, col="a", row=1)
         assert (
-            result.n_changes >= 1
-        ), f"loc assignment should be tracked, got {result.n_changes} changes"
+            result.n_changes == 1
+        ), f"loc assignment should track exactly 1 change, got {result.n_changes}"
 
 
 class TestMergeWarningLabeling:
@@ -296,14 +296,16 @@ class TestMergeWarningLabeling:
 
         # Should warn about LEFT having duplicates, not RIGHT
         dup_warnings = [w for w in result.warnings if "duplicate" in w.message.lower()]
-        assert len(dup_warnings) >= 1, "Should have duplicate key warning"
+        assert (
+            len(dup_warnings) == 1
+        ), f"Should have exactly 1 duplicate key warning, got {len(dup_warnings)}"
 
         # The warning should mention "Left table", not "Right table"
         left_warnings = [w for w in dup_warnings if "left" in w.message.lower()]
         right_warnings = [w for w in dup_warnings if "right" in w.message.lower()]
 
-        assert len(left_warnings) >= 1, (
-            f"Should warn about LEFT table having duplicates. "
+        assert len(left_warnings) == 1, (
+            f"Should have exactly 1 warning about LEFT table having duplicates. "
             f"Got warnings: {[w.message for w in dup_warnings]}"
         )
         # RIGHT is unique, shouldn't warn about right
@@ -325,12 +327,14 @@ class TestMergeWarningLabeling:
         result = tp.check(df)
 
         dup_warnings = [w for w in result.warnings if "duplicate" in w.message.lower()]
-        assert len(dup_warnings) >= 1, "Should have duplicate key warning"
+        assert (
+            len(dup_warnings) == 1
+        ), f"Should have exactly 1 duplicate key warning, got {len(dup_warnings)}"
 
         # The warning should mention "Right table"
         right_warnings = [w for w in dup_warnings if "right" in w.message.lower()]
-        assert len(right_warnings) >= 1, (
-            f"Should warn about RIGHT table having duplicates. "
+        assert len(right_warnings) == 1, (
+            f"Should have exactly 1 warning about RIGHT table having duplicates. "
             f"Got warnings: {[w.message for w in dup_warnings]}"
         )
 

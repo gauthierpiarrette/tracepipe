@@ -304,7 +304,9 @@ class TestRowLineageResult:
 
         row = dbg().explain_row(0)
         history = row.cell_history("a")
-        assert len(history) >= 1
+        assert (
+            len(history) == 1
+        ), f"Single fillna should record exactly 1 change, got {len(history)}"
 
     def test_history(self):
         """history() returns full history."""
@@ -487,7 +489,9 @@ class TestPreEnableDataFrameTracking:
         df["a"] = df["a"] * 10
 
         result = tracepipe.why(df, col="a", row=0)
-        assert len(result.history) >= 1
+        assert (
+            len(result.history) == 1
+        ), f"Single multiply should record exactly 1 change, got {len(result.history)}"
 
     def test_trace_after_register(self):
         """Row tracing works for registered DataFrames."""

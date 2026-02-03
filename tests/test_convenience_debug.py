@@ -410,7 +410,9 @@ class TestWhyResult:
         assert result is not None
         assert result.column == "amount"
         assert result.current_value == 300.0  # 200 * 1.5
-        assert result.n_changes >= 1
+        assert (
+            result.n_changes == 1
+        ), f"Single multiply should record exactly 1 change, got {result.n_changes}"
 
     def test_why_with_where_multiple_criteria(self):
         """why() with where= using multiple column criteria."""

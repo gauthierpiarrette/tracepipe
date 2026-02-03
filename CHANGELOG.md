@@ -17,6 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Known Limitations section in README documenting concat/dedup tracking gaps
 - Test for `DataFrame.fillna` single-event logging
 
+### Changed
+- **Test suite hardened** with exact count assertions and multi-scenario tests:
+  - Changed 15+ assertions from `>= 1` to `== 1` for precise verification
+  - Added `test_integration_scenarios.py` with 16 new tests covering:
+    - Multi-pipeline session isolation
+    - Warning message content verification
+    - Reliability scenarios (fillna, replace, loc, merge)
+    - Cross-pipeline contamination prevention
+
 ## 0.3.4 - 2026-02-03
 
 ### Fixed

@@ -100,7 +100,7 @@ class TestTransformOperations:
 
         row = dbg().explain_row(1)
         history = row.cell_history("a")
-        assert len(history) >= 1
+        assert len(history) == 1, f"fillna should record exactly 1 change, got {len(history)}"
 
     def test_fillna_inplace(self):
         """fillna(inplace=True) tracks changes."""
@@ -111,7 +111,9 @@ class TestTransformOperations:
 
         row = dbg().explain_row(1)
         history = row.cell_history("a")
-        assert len(history) >= 1
+        assert (
+            len(history) == 1
+        ), f"fillna(inplace=True) should record exactly 1 change, got {len(history)}"
         assert history[0]["new_val"] == 0.0
 
     def test_replace_tracks_changes(self):
@@ -123,7 +125,7 @@ class TestTransformOperations:
 
         row = dbg().explain_row(1)
         history = row.cell_history("a")
-        assert len(history) >= 1
+        assert len(history) == 1, f"replace should record exactly 1 change, got {len(history)}"
 
     def test_replace_inplace(self):
         """replace(inplace=True) tracks changes."""
@@ -134,7 +136,9 @@ class TestTransformOperations:
 
         row = dbg().explain_row(1)
         history = row.cell_history("a")
-        assert len(history) >= 1
+        assert (
+            len(history) == 1
+        ), f"replace(inplace=True) should record exactly 1 change, got {len(history)}"
         assert history[0]["new_val"] == 99
 
     def test_astype_preserves_row_ids(self):
@@ -172,7 +176,9 @@ class TestSetitem:
 
         row = dbg().explain_row(0)
         history = row.cell_history("a")
-        assert len(history) >= 1
+        assert (
+            len(history) == 1
+        ), f"Column overwrite should record exactly 1 change, got {len(history)}"
 
 
 class TestGroupBy:
@@ -453,7 +459,7 @@ class TestNAHandling:
 
         row = dbg().explain_row(1)
         history = row.cell_history("a")
-        assert len(history) >= 1
+        assert len(history) == 1, f"NA fillna should record exactly 1 change, got {len(history)}"
 
 
 class TestScalarAccessors:
@@ -467,11 +473,13 @@ class TestScalarAccessors:
         df.at[0, "a"] = 10
 
         stats = dbg().stats()
-        assert stats["total_diffs"] >= 1
+        assert (
+            stats["total_diffs"] == 1
+        ), f"df.at[] should record exactly 1 diff, got {stats['total_diffs']}"
 
         row = dbg().explain_row(0)
         history = row.cell_history("a")
-        assert len(history) >= 1
+        assert len(history) == 1, f"df.at[] should record exactly 1 change, got {len(history)}"
         assert history[0]["new_val"] == 10
 
     def test_iat_setitem_tracked(self):
@@ -482,11 +490,13 @@ class TestScalarAccessors:
         df.iat[1, 0] = 20  # Column 0 is "a"
 
         stats = dbg().stats()
-        assert stats["total_diffs"] >= 1
+        assert (
+            stats["total_diffs"] == 1
+        ), f"df.iat[] should record exactly 1 diff, got {stats['total_diffs']}"
 
         row = dbg().explain_row(1)
         history = row.cell_history("a")
-        assert len(history) >= 1
+        assert len(history) == 1, f"df.iat[] should record exactly 1 change, got {len(history)}"
         assert history[0]["new_val"] == 20
 
     def test_at_unwatched_column_not_tracked(self):
