@@ -103,7 +103,7 @@ def _make_wrapper(
         method_name: Name for error messages
         original_method: The original pandas method
         capture_func: func(self, args, kwargs, result, ctx, method_name)
-        mode: "standard", "filter", or "inplace"
+        mode: "standard", "filter", "inplace", or "transform"
     """
 
     @wraps(original_method)
@@ -112,10 +112,21 @@ def _make_wrapper(
 
         # === PRE-EXECUTION SETUP ===
         before_snapshot = None
+        is_inplace = kwargs.get("inplace", False)
 
         if mode == "filter" and ctx.enabled:
             ctx._filter_op_depth += 1
-        elif mode == "inplace" and ctx.enabled and kwargs.get("inplace", False):
+        elif mode == "transform" and ctx.enabled:
+            # Suppress __setitem__ recording during transform ops (fillna, replace)
+            # to avoid double-counting the same cell change
+            ctx._in_transform_op += 1
+            # Also handle inplace for transform operations
+            if is_inplace:
+                try:
+                    before_snapshot = self.copy()
+                except Exception:
+                    pass
+        elif mode == "inplace" and ctx.enabled and is_inplace:
             try:
                 before_snapshot = self.copy()
             except Exception:
@@ -127,15 +138,18 @@ def _make_wrapper(
         finally:
             if mode == "filter" and ctx.enabled:
                 ctx._filter_op_depth -= 1
+            elif mode == "transform" and ctx.enabled:
+                ctx._in_transform_op -= 1
 
         # === CAPTURE LINEAGE (SIDE EFFECT) ===
         # Skip capture if we're inside a filter operation (prevents recursion during export)
         if ctx.enabled and ctx._filter_op_depth == 0:
             try:
-                if mode == "inplace" and kwargs.get("inplace", False):
+                # Handle inplace for both "inplace" and "transform" modes
+                if (mode == "inplace" or mode == "transform") and is_inplace:
                     if before_snapshot is not None:
                         capture_func(before_snapshot, args, kwargs, self, ctx, method_name)
-                elif mode == "inplace" and result is not None:
+                elif (mode == "inplace" or mode == "transform") and result is not None:
                     capture_func(self, args, kwargs, result, ctx, method_name)
                 else:
                     capture_func(self, args, kwargs, result, ctx, method_name)
@@ -176,3 +190,14 @@ def wrap_pandas_method_inplace(
 ) -> Callable:
     """Wrap a pandas method that supports inplace=True."""
     return _make_wrapper(method_name, original_method, capture_func, mode="inplace")
+
+
+def wrap_pandas_transform_method(
+    method_name: str, original_method: Callable, capture_func: Callable
+) -> Callable:
+    """Wrap a pandas transform method (fillna, replace) that may trigger internal setitem.
+
+    These methods modify column values and pandas internally uses setitem.
+    We suppress setitem recording during these ops to avoid double-counting.
+    """
+    return _make_wrapper(method_name, original_method, capture_func, mode="transform")

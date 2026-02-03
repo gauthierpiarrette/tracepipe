@@ -63,6 +63,10 @@ class TracePipeContext:
         # When > 0, __getitem__[mask] skips capture (parent op will capture)
         self._filter_op_depth: int = 0
 
+        # Transform operation tracking (prevents double-counting fillna/replace)
+        # When > 0, __setitem__ skips capture (transform op will capture)
+        self._in_transform_op: int = 0
+
         # GroupBy state stack (supports nesting)
         self._groupby_stack: list[dict] = []
 

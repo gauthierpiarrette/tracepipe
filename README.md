@@ -207,6 +207,26 @@ tp.enable(mode="debug")  # Full lineage
 
 ---
 
+## Known Limitations
+
+TracePipe tracks **cell mutations** (fillna, replace, loc assignment) and **merge provenance** reliably. However, some patterns are not yet fully supported:
+
+| Pattern | Status | Notes |
+|---------|--------|-------|
+| `df["col"] = df["col"].fillna(0)` | ✅ Tracked | Series + assignment |
+| `df = df.fillna({"col": 0})` | ✅ Tracked | DataFrame-level fillna |
+| `df.loc[mask, "col"] = val` | ✅ Tracked | Conditional assignment |
+| `df.merge(other, on="key")` | ✅ Tracked | Full provenance in debug mode |
+| `pd.concat([df1, df2])` | ⚠️ Partial | Row IDs preserved, but no "source DataFrame" tracking |
+| `df.drop_duplicates(keep='last')` | ⚠️ Partial | Which row was kept is not tracked |
+| Sort + dedup patterns | ⚠️ Partial | "Latest record wins" logic not traced |
+
+**Why?** TracePipe tracks value changes within rows, not row-selection operations. When `drop_duplicates` picks one row over another, that's a provenance decision (not a cell mutation) that isn't currently instrumented.
+
+**Planned for 0.4**: Full row-provenance tracking for concat, drop_duplicates, and sort operations.
+
+---
+
 ## Contributing
 
 ```bash

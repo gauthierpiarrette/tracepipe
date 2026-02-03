@@ -22,6 +22,7 @@ from ..safety import (
     get_caller_info,
     wrap_pandas_method,
     wrap_pandas_method_inplace,
+    wrap_pandas_transform_method,
 )
 from ..utils.value_capture import find_changed_indices_vectorized
 from .apply_capture import instrument_apply_pipe, uninstrument_apply_pipe
@@ -554,6 +555,9 @@ def _wrap_setitem(original):
 
     Captures BEFORE state for existing columns, then executes assignment,
     then records the diff with actual old/new values.
+
+    Skips recording when inside a transform operation (fillna, replace) to
+    avoid double-counting cell changes - the transform wrapper will capture.
     """
 
     @wraps(original)
@@ -565,7 +569,9 @@ def _wrap_setitem(original):
         is_new_column = False
         should_track = False
 
-        if ctx.enabled and isinstance(key, str):
+        # Skip tracking if we're inside a transform operation (fillna, replace)
+        # Those operations will capture the change themselves
+        if ctx.enabled and isinstance(key, str) and ctx._in_transform_op == 0:
             if key in ctx.watched_columns:
                 should_track = True
                 if key in self.columns:
@@ -771,13 +777,15 @@ def instrument_pandas():
             wrapped = wrap_filter_method(method_name, original)
             setattr(pd.DataFrame, method_name, wrapped)
 
-    # === DataFrame transform methods (with inplace support) ===
+    # === DataFrame transform methods (fillna, replace) ===
+    # These use wrap_pandas_transform_method to suppress __setitem__ recording
+    # during the transform, avoiding double-counting cell changes
     transform_methods = ["fillna", "replace"]
     for method_name in transform_methods:
         if hasattr(pd.DataFrame, method_name):
             original = getattr(pd.DataFrame, method_name)
             _originals[f"DataFrame.{method_name}"] = original
-            wrapped = wrap_pandas_method_inplace(method_name, original, _capture_transform)
+            wrapped = wrap_pandas_transform_method(method_name, original, _capture_transform)
             setattr(pd.DataFrame, method_name, wrapped)
 
     # === astype (no inplace) ===

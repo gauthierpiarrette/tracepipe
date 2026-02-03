@@ -5,6 +5,18 @@ All notable changes to TracePipe will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.3.5 - 2026-02-03
+
+### Fixed
+- **DataFrame.fillna double-logging**: `df.fillna({"col": 0})` now logs exactly 1 event
+  - Previously logged both `DataFrame.fillna` and internal `__setitem__` for same change
+  - Added `wrap_pandas_transform_method` with `_in_transform_op` flag to suppress nested setitem
+  - Works for both `fillna` and `replace` operations, including `inplace=True`
+
+### Added
+- Known Limitations section in README documenting concat/dedup tracking gaps
+- Test for `DataFrame.fillna` single-event logging
+
 ## 0.3.4 - 2026-02-03
 
 ### Fixed

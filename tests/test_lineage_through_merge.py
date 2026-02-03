@@ -249,6 +249,23 @@ class TestFillnaTrackingVerification:
             result.n_changes >= 1
         ), f"DataFrame.fillna should be tracked, got {result.n_changes} changes"
 
+    def test_dataframe_fillna_logs_once_not_twice(self):
+        """df.fillna({'col': val}) should log exactly 1 event, not 2.
+
+        Previously, both DataFrame.fillna and the internal __setitem__ were
+        recording the same change, causing double-logging.
+        """
+        tp.enable(mode="debug", watch=["a"])
+
+        df = pd.DataFrame({"a": [1.0, None, 3.0]})
+        df = df.fillna({"a": 0})
+
+        result = tp.why(df, col="a", row=1)
+        assert result.n_changes == 1, (
+            f"DataFrame.fillna should log exactly 1 event, got {result.n_changes}. "
+            f"Double-logging bug if > 1. History: {result.history}"
+        )
+
     def test_loc_assignment_tracked(self):
         """df.loc[mask, col] = val should be tracked."""
         tp.enable(mode="debug", watch=["a"])
