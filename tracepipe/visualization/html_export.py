@@ -156,12 +156,17 @@ def _get_groups_summary(ctx) -> list[dict]:
     groups = []
     for mapping in ctx.store.aggregation_mappings:
         for group_key, row_ids in mapping.membership.items():
-            is_count_only = isinstance(row_ids, int)
+            # Count-only groups are stored as [-count] (list with one negative element)
+            is_count_only = len(row_ids) == 1 and row_ids[0] < 0
+            if is_count_only:
+                row_count = abs(row_ids[0])
+            else:
+                row_count = len(row_ids)
             groups.append(
                 {
                     "key": str(group_key),
                     "column": mapping.group_column,
-                    "row_count": row_ids if is_count_only else len(row_ids),
+                    "row_count": row_count,
                     "is_count_only": is_count_only,
                     "row_ids": [] if is_count_only else row_ids[:100],  # First 100 only
                     "agg_functions": mapping.agg_functions,
@@ -1059,9 +1064,13 @@ document.addEventListener('DOMContentLoaded', () => {
 """
 
 
-def save(filepath: str) -> None:
+def save(filepath: str, title: str = "TracePipe Dashboard") -> None:
     """
     Save interactive lineage report as HTML.
+
+    Args:
+        filepath: Path to save the HTML file
+        title: Title for the report (shown in browser tab and header)
     """
     ctx = get_context()
 
@@ -1073,7 +1082,9 @@ def save(filepath: str) -> None:
     row_index = _build_row_index(ctx)
 
     # Total registered rows (approximate)
-    total_registered = ctx.row_manager.next_row_id if hasattr(ctx.row_manager, "next_row_id") else 0
+    total_registered = (
+        ctx.row_manager._next_row_id if hasattr(ctx.row_manager, "_next_row_id") else 0
+    )
 
     # Identify Suggested Rows for UX
     suggested_rows = {"dropped": [], "modified": [], "survivors": []}
@@ -1181,13 +1192,16 @@ def save(filepath: str) -> None:
         </div>
         """
 
+    # Escape title for HTML
+    escaped_title = html.escape(title)
+
     html_content = f"""
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>TracePipe Dashboard</title>
+    <title>{escaped_title}</title>
     {CSS}
 </head>
 <body>
@@ -1217,7 +1231,7 @@ def save(filepath: str) -> None:
         <div class="main-content">
             <!-- Top Bar -->
             <div class="top-bar">
-                <div class="page-title">Data Lineage Report</div>
+                <div class="page-title">{escaped_title}</div>
                 <div class="search-wrapper">
                     <i class="search-icon-abs">🔍</i>
                     <input type="text" id="globalSearch" class="search-input"
@@ -1236,7 +1250,8 @@ def save(filepath: str) -> None:
                     </div>
                     <div class="card">
                         <h3>Retention</h3>
-                        <div class="metric-value">{(final_rows / initial_rows * 100) if initial_rows else 0:.1f}%</div>
+                        <div class="metric-value">{
+        (final_rows / initial_rows * 100) if initial_rows else 0:.1f}%</div>
                         <div class="metric-sub">{_format_number(final_rows)} of {
         _format_number(initial_rows)
     } rows</div>
