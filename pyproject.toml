@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tracepipe"
-version = "0.2.0"
+version = "0.3.0"
 description = "Row-level data lineage tracking for pandas pipelines"
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -55,6 +55,12 @@ dev = [
     "taskipy>=1.12.0",
     "pre-commit>=3.5.0",
 ]
+docs = [
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.5.0",
+    "mkdocstrings[python]>=0.24.0",
+    "pymdown-extensions>=10.0.0",
+]
 all = [
     "pyarrow>=10.0.0",
     "psutil>=5.9.0",
@@ -62,9 +68,10 @@ all = [
 
 [project.urls]
 Homepage = "https://github.com/tracepipe/tracepipe"
-Documentation = "https://github.com/tracepipe/tracepipe#readme"
+Documentation = "https://tracepipe.github.io/tracepipe/"
 Repository = "https://github.com/tracepipe/tracepipe.git"
 Issues = "https://github.com/tracepipe/tracepipe/issues"
+Changelog = "https://tracepipe.github.io/tracepipe/changelog/"
 
 [tool.hatch.build.targets.wheel]
 packages = ["tracepipe"]
