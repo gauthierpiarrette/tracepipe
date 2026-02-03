@@ -19,7 +19,6 @@ from typing import Any, Optional
 import pandas as pd
 
 from .context import get_context
-from .core import ChangeType
 
 
 @dataclass
@@ -96,7 +95,12 @@ class ValueHistory:
         }
 
 
-def explain_value(row_id: int, column: str, df: Optional[pd.DataFrame] = None) -> ValueHistory:
+def explain_value(
+    row_id: int,
+    column: str,
+    df: Optional[pd.DataFrame] = None,
+    follow_lineage: bool = True,
+) -> ValueHistory:
     """
     Get complete history of a specific cell's value.
 
@@ -104,6 +108,7 @@ def explain_value(row_id: int, column: str, df: Optional[pd.DataFrame] = None) -
         row_id: Row ID to trace
         column: Column name
         df: Optional DataFrame for current value lookup
+        follow_lineage: If True, include pre-merge parent history (default: True)
 
     Returns:
         ValueHistory with all changes to this cell
@@ -121,35 +126,38 @@ def explain_value(row_id: int, column: str, df: Optional[pd.DataFrame] = None) -
             if len(matches) > 0 and column in df.columns:
                 current_value = df.iloc[matches[0]][column]
 
-    # Collect all events for this cell
+    # Collect events - use lineage-aware method if requested
+    if follow_lineage and hasattr(store, "get_cell_history_with_lineage"):
+        # Get cell history including pre-merge parent history
+        raw_events = store.get_cell_history_with_lineage(row_id, column)
+    else:
+        # Fallback to direct row_id lookup only
+        raw_events = [e for e in store.get_row_history(row_id) if e["col"] == column]
+
+    # Convert to ValueEvent objects
     events = []
-    step_map = {s.step_id: s for s in store.steps}
     became_null_at = None
     became_null_by = None
 
-    for diff in store._iter_all_diffs():
-        if diff["row_id"] == row_id and diff["col"] == column:
-            step = step_map.get(diff["step_id"])
-
-            events.append(
-                ValueEvent(
-                    step_id=diff["step_id"],
-                    operation=step.operation if step else "unknown",
-                    old_value=diff["old_val"],
-                    new_value=diff["new_val"],
-                    change_type=ChangeType(diff["change_type"]).name,
-                    timestamp=step.timestamp if step else 0,
-                    code_location=(
-                        f"{step.code_file}:{step.code_line}" if step and step.code_file else None
-                    ),
-                )
+    for diff in raw_events:
+        events.append(
+            ValueEvent(
+                step_id=diff["step_id"],
+                operation=diff.get("operation", "unknown"),
+                old_value=diff["old_val"],
+                new_value=diff["new_val"],
+                change_type=diff.get("change_type", "UNKNOWN"),
+                timestamp=diff.get("timestamp", 0) or 0,
+                code_location=diff.get("code_location"),
             )
+        )
 
-            # Track when value became null
-            if became_null_at is None and pd.isna(diff["new_val"]) and not pd.isna(diff["old_val"]):
-                became_null_at = diff["step_id"]
-                became_null_by = step.operation if step else "unknown"
+        # Track when value became null
+        if became_null_at is None and pd.isna(diff["new_val"]) and not pd.isna(diff["old_val"]):
+            became_null_at = diff["step_id"]
+            became_null_by = diff.get("operation", "unknown")
 
+    # Events should already be sorted by step_id from lineage method
     events.sort(key=lambda e: e.step_id)
 
     return ValueHistory(

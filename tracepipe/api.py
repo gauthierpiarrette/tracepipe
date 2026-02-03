@@ -75,12 +75,18 @@ def enable(
         # Custom configuration
         tp.enable(mode="ci", merge_provenance=True)
     """
+    ctx = get_context()
+
+    # If already enabled, reset accumulated state to prevent duplicate warnings/stats
+    # This handles the common case of re-running scripts in notebooks/IDEs
+    if ctx.enabled:
+        _reset_accumulated_state(ctx)
+
     # Get or create config
     # If config is provided explicitly, use it
     # Otherwise, start with existing context config (if any) or create new default
     if config is None:
-        existing_ctx = get_context()
-        config = existing_ctx.config  # Use existing config as base
+        config = ctx.config  # Use existing config as base
 
     # Handle mode
     if mode is not None:
@@ -115,14 +121,14 @@ def enable(
         ctx = TracePipeContext(config=config, backend=backend, identity=identity)
         set_context(ctx)
     else:
-        ctx = get_context()
         ctx.config = config
         # Also update config in row_manager and store (they may have their own references)
         ctx.row_manager.config = config
         ctx.store.config = config
 
-    # Add watched columns
+    # Add watched columns (reset first if re-enabling to avoid stale watches)
     if watch:
+        ctx.watched_columns.clear()
         ctx.watched_columns.update(watch)
 
     if not ctx.enabled:
@@ -130,6 +136,50 @@ def enable(
         ctx.enabled = True
 
     return _get_module()
+
+
+def _reset_accumulated_state(ctx: TracePipeContext) -> None:
+    """
+    Reset accumulated lineage state without disabling instrumentation.
+
+    Called when enable() is invoked on an already-enabled context to prevent
+    state accumulation across multiple script runs in the same Python process.
+    """
+    store = ctx.store
+
+    # Clear merge stats (prevents duplicate warnings)
+    if hasattr(store, "merge_stats"):
+        store.merge_stats.clear()
+
+    # Clear bulk drops
+    if hasattr(store, "bulk_drops"):
+        store.bulk_drops.clear()
+
+    # Clear steps
+    if hasattr(store, "_steps"):
+        store._steps.clear()
+
+    # Clear in-memory diffs
+    if hasattr(store, "_clear_in_memory"):
+        store._clear_in_memory()
+
+    # Reset step counter
+    if hasattr(store, "_step_counter"):
+        store._step_counter = 0
+
+    # Clear merge mappings
+    if hasattr(store, "merge_mappings"):
+        store.merge_mappings.clear()
+
+    # Clear aggregation mappings
+    if hasattr(store, "aggregation_mappings"):
+        store.aggregation_mappings.clear()
+
+    # Reset row identity manager
+    ctx.row_manager.clear()
+
+    # Clear watched columns (will be re-added if watch param provided)
+    ctx.watched_columns.clear()
 
 
 def disable() -> types.ModuleType:

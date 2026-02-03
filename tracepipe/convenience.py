@@ -733,8 +733,13 @@ def _build_trace_result(row_id: int, ctx, include_ghost: bool) -> TraceResult:
     store = ctx.store
 
     drop_event = store.get_drop_event(row_id)
-    history = store.get_row_history(row_id)
     merge_origin = store.get_merge_origin(row_id)
+
+    # Use lineage-aware history to include pre-merge parent events
+    if hasattr(store, "get_row_history_with_lineage"):
+        history = store.get_row_history_with_lineage(row_id)
+    else:
+        history = store.get_row_history(row_id)
 
     dropped_at = None
     if drop_event:

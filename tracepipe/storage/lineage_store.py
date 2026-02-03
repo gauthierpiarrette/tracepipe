@@ -485,6 +485,9 @@ class InMemoryLineageStore:
 
         CONTRACT: Returned list has monotonically increasing step_id.
         Convenience layer may reverse for display.
+
+        Note: This returns only direct events for this row_id.
+        Use get_row_history_with_lineage() to include pre-merge parent history.
         """
         step_map = {s.step_id: s for s in self._steps}
         events = []
@@ -545,6 +548,65 @@ class InMemoryLineageStore:
         events.sort(key=lambda e: e["step_id"])
 
         return events
+
+    def get_row_history_with_lineage(self, row_id: int, max_depth: int = 10) -> list[dict]:
+        """
+        Get row history including pre-merge parent history.
+
+        Follows merge lineage recursively to build complete cell provenance.
+        This is essential for tracking changes that happened before merge operations.
+
+        Args:
+            row_id: Row ID to trace
+            max_depth: Maximum merge depth to follow (prevents infinite loops)
+
+        Returns:
+            List of events in chronological order, including parent row events.
+        """
+        visited: set[int] = set()
+
+        def _collect_history(rid: int, depth: int) -> list[dict]:
+            if depth > max_depth or rid in visited:
+                return []
+            visited.add(rid)
+
+            events = []
+
+            # Check if this row came from a merge
+            origin = self.get_merge_origin(rid)
+            if origin and origin["left_parent"] is not None:
+                # Recursively get parent's history first (chronological order)
+                parent_events = _collect_history(origin["left_parent"], depth + 1)
+                events.extend(parent_events)
+
+            # Add this row's direct events
+            events.extend(self.get_row_history(rid))
+
+            return events
+
+        all_events = _collect_history(row_id, 0)
+
+        # Sort by step_id to ensure chronological order across lineage
+        all_events.sort(key=lambda e: e["step_id"])
+
+        return all_events
+
+    def get_cell_history_with_lineage(
+        self, row_id: int, column: str, max_depth: int = 10
+    ) -> list[dict]:
+        """
+        Get cell history for a specific column, including pre-merge parent history.
+
+        Args:
+            row_id: Row ID to trace
+            column: Column name to filter events for
+            max_depth: Maximum merge depth to follow
+
+        Returns:
+            List of events for this column in chronological order.
+        """
+        all_events = self.get_row_history_with_lineage(row_id, max_depth)
+        return [e for e in all_events if e["col"] == column]
 
     def get_dropped_rows(self, step_id: Optional[int] = None) -> list[int]:
         """Get all dropped row IDs, optionally filtered by step."""
