@@ -3,6 +3,11 @@
 In-memory lineage storage using Structure of Arrays (SoA) pattern.
 
 Memory: ~40 bytes/diff vs ~150 bytes with dataclass
+
+Features:
+- Merge mapping storage with O(log n) lookup via binary search
+- Sorted bulk drops for efficient drop event lookup
+- Stable API for api/convenience/visualization layers
 """
 
 import atexit
@@ -11,13 +16,17 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
+import numpy as np
+
 from ..core import (
     AggregationMapping,
     ChangeType,
     CompletenessLevel,
     LineageGap,
     LineageGaps,
-    StepMetadata,
+    MergeMapping,
+    MergeStats,
+    StepEvent,
     TracePipeConfig,
 )
 from ..utils.value_capture import capture_typed_value
@@ -29,9 +38,26 @@ class InMemoryLineageStore:
 
     Implements: LineageBackend protocol
 
-    Future alternatives:
-    - SQLiteLineageStore: Persistent storage for long-running pipelines
-    - DeltaLakeBackend: Distributed storage for big data
+    STABLE INTERNAL API (used by api.py, convenience.py, visualization):
+
+    === ATTRIBUTES (read-only from outside) ===
+    steps: list[StepEvent]                    # All recorded steps
+    bulk_drops: dict[int, np.ndarray]         # step_id -> sorted dropped RIDs
+    merge_mappings: list[MergeMapping]        # Merge parent mappings (debug mode)
+    merge_stats: list[tuple[int, MergeStats]] # (step_id, stats) pairs
+
+    === WRITE METHODS (called by instrumentation) ===
+    append_step(...) -> int                   # Returns step_id
+    append_bulk_drops(step_id, rids)          # rids will be sorted internally
+    append_diff(step_id, row_id, col, ...)    # Cell-level diff
+
+    === READ METHODS (called by api/convenience) ===
+    get_drop_event(row_id) -> Optional[dict]  # {step_id, operation}
+    get_dropped_rows() -> list[int]           # All dropped RIDs
+    get_dropped_by_step() -> dict[str, int]   # operation -> count
+    get_row_history(row_id) -> list[dict]     # Chronological events
+    get_merge_stats(step_id=None) -> list[tuple[int, MergeStats]]
+    get_merge_origin(row_id) -> Optional[dict]  # {left_parent, right_parent, step_id}
     """
 
     def __init__(self, config: TracePipeConfig):
@@ -49,7 +75,14 @@ class InMemoryLineageStore:
         self.diff_change_types: list[int] = []
 
         # === STEP METADATA ===
-        self._steps: list[StepMetadata] = []
+        self._steps: list[StepEvent] = []
+
+        # === BULK DROPS (step_id -> SORTED numpy array) ===
+        self.bulk_drops: dict[int, np.ndarray] = {}
+
+        # === MERGE TRACKING ===
+        self.merge_mappings: list[MergeMapping] = []
+        self.merge_stats: list[tuple[int, MergeStats]] = []
 
         # === AGGREGATION MAPPINGS ===
         self.aggregation_mappings: list[AggregationMapping] = []
@@ -66,11 +99,12 @@ class InMemoryLineageStore:
         self._col_intern: dict[str, str] = {}
         self._type_intern: dict[str, str] = {}
 
-        # Register cleanup on exit
-        atexit.register(self._cleanup_spillover)
+        # === ATEXIT HANDLER ===
+        self._atexit_registered: bool = False
+        self._register_atexit()
 
     @property
-    def steps(self) -> list[StepMetadata]:
+    def steps(self) -> list[StepEvent]:
         """Access step metadata list."""
         return self._steps
 
@@ -150,8 +184,7 @@ class InMemoryLineageStore:
         """
         Bulk append dropped rows - optimized for filter operations.
 
-        Uses list.extend() for O(1) amortized append instead of O(n) individual appends.
-        Typically 10-50x faster than calling append_diff() in a loop.
+        Stores dropped RIDs SORTED for O(log n) lookup via searchsorted.
 
         Args:
             step_id: Step ID for all drops
@@ -160,24 +193,28 @@ class InMemoryLineageStore:
         Returns:
             Number of drops recorded
         """
-        import numpy as np
-
         n = len(dropped_row_ids)
         if n == 0:
             return 0
 
-        # Convert to list if numpy array
+        # Convert to sorted numpy array
         if isinstance(dropped_row_ids, np.ndarray):
-            row_ids_list = dropped_row_ids.tolist()
+            sorted_rids = np.sort(dropped_row_ids.astype(np.int64))
         else:
-            row_ids_list = list(dropped_row_ids)
+            sorted_rids = np.sort(np.array(list(dropped_row_ids), dtype=np.int64))
+
+        # Store sorted for O(log n) lookup
+        self.bulk_drops[step_id] = sorted_rids
+
+        # Also record in diff arrays for backwards compatibility
+        row_ids_list = sorted_rids.tolist()
 
         # Pre-intern the constant strings once
         col_interned = self._intern_string("__row__", self._col_intern)
         old_type_interned = self._intern_string("str", self._type_intern)
         new_type_interned = self._intern_string("null", self._type_intern)
 
-        # Bulk extend all arrays at once (much faster than individual appends)
+        # Bulk extend all arrays at once
         self.diff_step_ids.extend([step_id] * n)
         self.diff_row_ids.extend(row_ids_list)
         self.diff_cols.extend([col_interned] * n)
@@ -212,7 +249,7 @@ class InMemoryLineageStore:
         """Append step metadata and return step_id."""
         step_id = self.next_step_id()
         self._steps.append(
-            StepMetadata(
+            StepEvent(
                 step_id=step_id,
                 operation=operation,
                 stage=stage,
@@ -249,6 +286,64 @@ class InMemoryLineageStore:
     def should_track_cell_diffs(self, affected_count: int) -> bool:
         """Return False for mass updates exceeding threshold."""
         return affected_count <= self.config.max_diffs_per_step
+
+    # === DROP LOOKUP (O(log n) via searchsorted) ===
+
+    def get_drop_event(self, row_id: int) -> Optional[dict]:
+        """
+        Get drop event for a row from bulk_drops.
+
+        O(log n) per step via searchsorted.
+
+        Returns:
+            {step_id, operation} if dropped, else None.
+        """
+        for step_id, dropped_rids in self.bulk_drops.items():
+            # Binary search in sorted array
+            i = np.searchsorted(dropped_rids, row_id)
+            if i < len(dropped_rids) and dropped_rids[i] == row_id:
+                step = self._steps[step_id - 1] if step_id <= len(self._steps) else None
+                return {
+                    "step_id": step_id,
+                    "operation": step.operation if step else "unknown",
+                }
+        return None
+
+    def is_dropped(self, row_id: int) -> bool:
+        """Fast check if row was dropped anywhere."""
+        return self.get_drop_event(row_id) is not None
+
+    # === MERGE LOOKUP (O(log n) via searchsorted) ===
+
+    def get_merge_origin(self, row_id: int) -> Optional[dict]:
+        """
+        Get merge parent RIDs for a row.
+
+        Uses binary search (O(log n)) instead of linear scan (O(n)).
+        """
+        for mapping in self.merge_mappings:
+            # Binary search on sorted out_rids
+            i = np.searchsorted(mapping.out_rids, row_id)
+            if i < len(mapping.out_rids) and mapping.out_rids[i] == row_id:
+                left_parent = mapping.left_parent_rids[i]
+                right_parent = mapping.right_parent_rids[i]
+                return {
+                    "step_id": mapping.step_id,
+                    "left_parent": int(left_parent) if left_parent >= 0 else None,
+                    "right_parent": int(right_parent) if right_parent >= 0 else None,
+                }
+        return None
+
+    def get_merge_stats(self, step_id: Optional[int] = None) -> list[tuple[int, MergeStats]]:
+        """
+        Get merge statistics.
+
+        Returns:
+            list of (step_id, MergeStats) tuples - ALWAYS this shape for consistency.
+        """
+        if step_id is not None:
+            return [(sid, s) for sid, s in self.merge_stats if sid == step_id]
+        return list(self.merge_stats)
 
     # === MEMORY MANAGEMENT ===
 
@@ -307,8 +402,26 @@ class InMemoryLineageStore:
         self.diff_change_types.clear()
         self._diff_count = 0
 
+    def _register_atexit(self) -> None:
+        """Register cleanup handler if not already registered."""
+        if not self._atexit_registered:
+            atexit.register(self._cleanup_spillover)
+            self._atexit_registered = True
+
+    def _unregister_atexit(self) -> None:
+        """Unregister cleanup handler."""
+        if self._atexit_registered:
+            try:
+                atexit.unregister(self._cleanup_spillover)
+            except Exception:
+                pass
+            self._atexit_registered = False
+
     def _cleanup_spillover(self) -> None:
         """Clean up spillover files on exit."""
+        # Unregister to prevent multiple calls
+        self._unregister_atexit()
+
         if not self.config.cleanup_spillover_on_disable:
             return
 
@@ -367,12 +480,45 @@ class InMemoryLineageStore:
             }
 
     def get_row_history(self, row_id: int) -> list[dict]:
-        """Get all events for a specific row."""
+        """
+        Get all events for a specific row in CHRONOLOGICAL order (oldest first).
+
+        CONTRACT: Returned list has monotonically increasing step_id.
+        Convenience layer may reverse for display.
+        """
         step_map = {s.step_id: s for s in self._steps}
         events = []
 
+        # Collect from bulk_drops (sorted by step_id)
+        for step_id in sorted(self.bulk_drops.keys()):
+            dropped_rids = self.bulk_drops[step_id]
+            i = np.searchsorted(dropped_rids, row_id)
+            if i < len(dropped_rids) and dropped_rids[i] == row_id:
+                step = step_map.get(step_id)
+                events.append(
+                    {
+                        "step_id": step_id,
+                        "operation": step.operation if step else "unknown",
+                        "stage": step.stage if step else None,
+                        "col": "__row__",
+                        "old_val": "present",
+                        "old_type": "str",
+                        "new_val": None,
+                        "new_type": "null",
+                        "change_type": "DROPPED",
+                        "timestamp": step.timestamp if step else None,
+                        "completeness": step.completeness.name if step else "UNKNOWN",
+                        "code_location": (
+                            f"{step.code_file}:{step.code_line}"
+                            if step and step.code_file
+                            else None
+                        ),
+                    }
+                )
+
+        # Collect from diffs
         for diff in self._iter_all_diffs():
-            if diff["row_id"] == row_id:
+            if diff["row_id"] == row_id and diff["col"] != "__row__":
                 step = step_map.get(diff["step_id"])
                 events.append(
                     {
@@ -395,16 +541,22 @@ class InMemoryLineageStore:
                     }
                 )
 
-        return sorted(events, key=lambda e: e["step_id"])
+        # ENFORCE: sort by step_id (chronological)
+        events.sort(key=lambda e: e["step_id"])
+
+        return events
 
     def get_dropped_rows(self, step_id: Optional[int] = None) -> list[int]:
         """Get all dropped row IDs, optionally filtered by step."""
-        dropped = set()
+        if step_id is not None:
+            if step_id in self.bulk_drops:
+                return self.bulk_drops[step_id].tolist()
+            return []
 
-        for diff in self._iter_all_diffs():
-            if diff["change_type"] == ChangeType.DROPPED:
-                if step_id is None or diff["step_id"] == step_id:
-                    dropped.add(diff["row_id"])
+        # Collect all dropped rows
+        dropped = set()
+        for rids in self.bulk_drops.values():
+            dropped.update(rids.tolist())
 
         return sorted(dropped)
 
@@ -413,10 +565,9 @@ class InMemoryLineageStore:
         step_map = {s.step_id: s.operation for s in self._steps}
         counts: dict[str, int] = {}
 
-        for diff in self._iter_all_diffs():
-            if diff["change_type"] == ChangeType.DROPPED:
-                op = step_map.get(diff["step_id"], "unknown")
-                counts[op] = counts.get(op, 0) + 1
+        for step_id, rids in self.bulk_drops.items():
+            op = step_map.get(step_id, "unknown")
+            counts[op] = counts.get(op, 0) + len(rids)
 
         return dict(sorted(counts.items(), key=lambda x: -x[1]))
 
@@ -458,6 +609,13 @@ class InMemoryLineageStore:
         gaps = []
         row_step_ids = set()
 
+        # From bulk_drops
+        for step_id, rids in self.bulk_drops.items():
+            i = np.searchsorted(rids, row_id)
+            if i < len(rids) and rids[i] == row_id:
+                row_step_ids.add(step_id)
+
+        # From diffs
         for diff in self._iter_all_diffs():
             if diff["row_id"] == row_id:
                 row_step_ids.add(diff["step_id"])
@@ -490,28 +648,12 @@ class InMemoryLineageStore:
         diffs = list(self._iter_all_diffs())
 
         data = {
-            "tracepipe_version": "0.2.0",
+            "tracepipe_version": "0.3.0",
             "export_timestamp": time.time(),
             "total_diffs": len(diffs),
             "total_steps": len(self._steps),
             "diffs": diffs,
-            "steps": [
-                {
-                    "step_id": s.step_id,
-                    "operation": s.operation,
-                    "stage": s.stage,
-                    "timestamp": s.timestamp,
-                    "code_file": s.code_file,
-                    "code_line": s.code_line,
-                    "params": s.params,
-                    "input_shape": s.input_shape,
-                    "output_shape": s.output_shape,
-                    "is_mass_update": s.is_mass_update,
-                    "rows_affected": s.rows_affected,
-                    "completeness": s.completeness.name,
-                }
-                for s in self._steps
-            ],
+            "steps": [s.to_dict() for s in self._steps],
             "aggregation_mappings": [
                 {
                     "step_id": a.step_id,
@@ -521,6 +663,7 @@ class InMemoryLineageStore:
                 }
                 for a in self.aggregation_mappings
             ],
+            "merge_stats": [{"step_id": sid, **vars(stats)} for sid, stats in self.merge_stats],
         }
 
         return json.dumps(data)
