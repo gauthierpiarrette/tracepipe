@@ -1,6 +1,6 @@
 site_name: TracePipe
 site_description: Row-level data lineage tracking for pandas pipelines
-site_url: https://tracepipe.github.io/tracepipe/
+site_url: https://gauthierpiarrette.github.io/tracepipe/
 repo_url: https://github.com/gauthierpiarrette/tracepipe
 repo_name: gauthierpiarrette/tracepipe
 edit_uri: edit/main/docs/
