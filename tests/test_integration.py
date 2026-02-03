@@ -8,13 +8,17 @@ import pandas as pd
 import tracepipe
 
 
+def dbg():
+    """Helper to access debug inspector."""
+    return tracepipe.debug.inspect()
+
+
 class TestComplexPipelines:
     """Tests for complex multi-step pipelines."""
 
     def test_etl_pipeline(self):
         """Typical ETL pipeline works correctly."""
-        tracepipe.enable()
-        tracepipe.watch("amount")
+        tracepipe.enable(watch=["amount"])
 
         # Extract
         with tracepipe.stage("extract"):
@@ -36,14 +40,14 @@ class TestComplexPipelines:
             _result = df.copy()
 
         # Verify tracking
-        stats = tracepipe.stats()
+        stats = dbg().stats()
         assert stats["total_steps"] >= 2  # dropna + setitem at minimum
 
-        dropped = tracepipe.dropped_rows()
+        dropped = dbg().dropped_rows()
         assert len(dropped) == 2
 
-        steps = tracepipe.steps()
-        transform_steps = [s for s in steps if s["stage"] == "transform"]
+        steps = dbg().steps
+        transform_steps = [s for s in steps if s.stage == "transform"]
         assert len(transform_steps) >= 1  # dropna and setitem happen in transform
 
     def test_aggregation_pipeline(self):
@@ -60,10 +64,10 @@ class TestComplexPipelines:
         _summary = df.groupby("region").agg({"sales": ["sum", "mean"]})
 
         # Verify group membership
-        east_group = tracepipe.explain_group("East")
+        east_group = dbg().explain_group("East")
         assert east_group.row_count == 3
 
-        west_group = tracepipe.explain_group("West")
+        west_group = dbg().explain_group("West")
         assert west_group.row_count == 2
 
 
@@ -78,7 +82,7 @@ class TestEdgeCases:
         result = df.dropna()
 
         assert len(result) == 0
-        assert tracepipe.stats()["enabled"]
+        assert dbg().stats()["enabled"]
 
     def test_single_row_dataframe(self):
         """Single row DataFrames work correctly."""
@@ -87,20 +91,19 @@ class TestEdgeCases:
 
         _result = df.head(1)
 
-        row = tracepipe.explain(0)
+        row = dbg().explain_row(0)
         assert row is not None
         assert row.is_alive
 
     def test_special_column_names(self):
         """Columns with special characters work."""
-        tracepipe.enable()
-        tracepipe.watch("col with spaces", "col/slash")
+        tracepipe.enable(watch=["col with spaces", "col/slash"])
 
         df = pd.DataFrame({"col with spaces": [1, 2, 3], "col/slash": [4, 5, 6]})
 
         df["col with spaces"] = df["col with spaces"] * 2
 
-        steps = tracepipe.steps()
+        steps = dbg().steps
         assert len(steps) >= 1
 
     def test_large_dataframe(self):
@@ -112,7 +115,7 @@ class TestEdgeCases:
         df = df.head(50_000)
 
         # Should complete without error
-        stats = tracepipe.stats()
+        stats = dbg().stats()
         assert stats["enabled"]
 
     def test_deeply_chained_operations(self):
@@ -131,7 +134,7 @@ class TestEdgeCases:
         )
 
         # Tracking should still work
-        stats = tracepipe.stats()
+        stats = dbg().stats()
         assert stats["total_steps"] >= 2  # At least some steps tracked
 
 
@@ -150,7 +153,7 @@ class TestConcurrencySimulation:
         df2 = df2.head(2)
         df3 = df3.head(2)
 
-        dropped = tracepipe.dropped_rows()
+        dropped = dbg().dropped_rows()
 
         # Each df dropped 1 row
         assert len(dropped) == 3
@@ -166,7 +169,7 @@ class TestConcurrencySimulation:
         df = df.head(2)
 
         # Both operations should be tracked
-        stats = tracepipe.stats()
+        stats = dbg().stats()
         assert stats["total_steps"] >= 2
 
 
@@ -174,12 +177,12 @@ class TestErrorRecovery:
     """Tests for error handling and recovery."""
 
     def test_invalid_explain_row(self):
-        """explain() with invalid row ID returns result."""
+        """explain_row() with invalid row ID returns result."""
         tracepipe.enable()
         _df = pd.DataFrame({"a": [1, 2, 3]})
 
         # Row ID that was never created
-        row = tracepipe.explain(999)
+        row = dbg().explain_row(999)
 
         # Should return a result (possibly with empty history)
         assert row is not None
@@ -191,7 +194,7 @@ class TestErrorRecovery:
         df.groupby("cat").sum()
 
         # Group that doesn't exist
-        group = tracepipe.explain_group("Z")
+        group = dbg().explain_group("Z")
 
         # Should return a result (possibly with no members)
         assert group is not None
