@@ -129,7 +129,8 @@ def _make_wrapper(
                 ctx._filter_op_depth -= 1
 
         # === CAPTURE LINEAGE (SIDE EFFECT) ===
-        if ctx.enabled:
+        # Skip capture if we're inside a filter operation (prevents recursion during export)
+        if ctx.enabled and ctx._filter_op_depth == 0:
             try:
                 if mode == "inplace" and kwargs.get("inplace", False):
                     if before_snapshot is not None:
@@ -141,8 +142,7 @@ def _make_wrapper(
             except Exception as e:
                 if ctx.config.strict_mode:
                     raise TracePipeError(
-                        f"Instrumentation failed for {method_name}: {e}\n"
-                        f"{traceback.format_exc()}"
+                        f"Instrumentation failed for {method_name}: {e}\n{traceback.format_exc()}"
                     ) from e
                 else:
                     warnings.warn(
