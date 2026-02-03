@@ -385,22 +385,27 @@ def check(
                 )
             )
 
-        if stats.left_dup_rate > 0.01:
-            warnings_list.append(
-                CheckWarning(
-                    category="duplicate_keys",
-                    severity="fact",
-                    message=f"Left table has {stats.left_dup_rate:.1%} duplicate join keys",
-                    details={"step_id": step_id, "dup_rate": stats.left_dup_rate},
-                )
-            )
+        # Note on dup_rate semantics:
+        # - left_dup_rate = fraction of LEFT rows appearing >1 times in result
+        #   This happens when RIGHT table has duplicate join keys
+        # - right_dup_rate = fraction of RIGHT rows appearing >1 times in result
+        #   This happens when LEFT table has duplicate join keys
         if stats.right_dup_rate > 0.01:
             warnings_list.append(
                 CheckWarning(
                     category="duplicate_keys",
                     severity="fact",
-                    message=f"Right table has {stats.right_dup_rate:.1%} duplicate join keys",
+                    message=f"Left table has {stats.right_dup_rate:.1%} duplicate join keys",
                     details={"step_id": step_id, "dup_rate": stats.right_dup_rate},
+                )
+            )
+        if stats.left_dup_rate > 0.01:
+            warnings_list.append(
+                CheckWarning(
+                    category="duplicate_keys",
+                    severity="fact",
+                    message=f"Right table has {stats.left_dup_rate:.1%} duplicate join keys",
+                    details={"step_id": step_id, "dup_rate": stats.left_dup_rate},
                 )
             )
 

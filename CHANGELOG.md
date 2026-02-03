@@ -5,6 +5,12 @@ All notable changes to TracePipe will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.3.2 - 2026-02-03
+
+### Fixed
+- Merge duplicate key warnings now correctly identify which table (left/right) has duplicates
+- Previously `right_dup_rate` was mislabeled as "Right table" when it actually indicates LEFT table duplicates
+
 ## 0.3.1 - 2026-02-03
 
 ### Fixed

@@ -262,6 +262,62 @@ class TestFillnaTrackingVerification:
         ), f"loc assignment should be tracked, got {result.n_changes} changes"
 
 
+class TestMergeWarningLabeling:
+    """Tests for correct left/right labeling in merge warnings."""
+
+    def test_duplicate_left_keys_warns_about_left(self):
+        """When LEFT has duplicate keys, warning should say 'Left table'."""
+        tp.enable(mode="debug")
+
+        # LEFT has duplicate key (94107 appears twice)
+        left = pd.DataFrame({"zip": ["10001", "94107", "94107"], "val": [1, 2, 3]})
+        # RIGHT has unique keys
+        right = pd.DataFrame({"zip": ["10001", "94107", "99999"], "region": ["NY", "CA", "XX"]})
+
+        df = left.merge(right, on="zip", how="left")
+        result = tp.check(df)
+
+        # Should warn about LEFT having duplicates, not RIGHT
+        dup_warnings = [w for w in result.warnings if "duplicate" in w.message.lower()]
+        assert len(dup_warnings) >= 1, "Should have duplicate key warning"
+
+        # The warning should mention "Left table", not "Right table"
+        left_warnings = [w for w in dup_warnings if "left" in w.message.lower()]
+        right_warnings = [w for w in dup_warnings if "right" in w.message.lower()]
+
+        assert len(left_warnings) >= 1, (
+            f"Should warn about LEFT table having duplicates. "
+            f"Got warnings: {[w.message for w in dup_warnings]}"
+        )
+        # RIGHT is unique, shouldn't warn about right
+        assert len(right_warnings) == 0, (
+            f"Should NOT warn about RIGHT table (it's unique). "
+            f"Got warnings: {[w.message for w in dup_warnings]}"
+        )
+
+    def test_duplicate_right_keys_warns_about_right(self):
+        """When RIGHT has duplicate keys, warning should say 'Right table'."""
+        tp.enable(mode="debug")
+
+        # LEFT has unique keys
+        left = pd.DataFrame({"zip": ["10001", "94107"], "val": [1, 2]})
+        # RIGHT has duplicate key (94107 appears twice)
+        right = pd.DataFrame({"zip": ["10001", "94107", "94107"], "region": ["NY", "CA", "CA2"]})
+
+        df = left.merge(right, on="zip", how="left")
+        result = tp.check(df)
+
+        dup_warnings = [w for w in result.warnings if "duplicate" in w.message.lower()]
+        assert len(dup_warnings) >= 1, "Should have duplicate key warning"
+
+        # The warning should mention "Right table"
+        right_warnings = [w for w in dup_warnings if "right" in w.message.lower()]
+        assert len(right_warnings) >= 1, (
+            f"Should warn about RIGHT table having duplicates. "
+            f"Got warnings: {[w.message for w in dup_warnings]}"
+        )
+
+
 class TestLineageDepthLimit:
     """Tests for lineage traversal depth limiting."""
 
