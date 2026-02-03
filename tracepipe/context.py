@@ -3,12 +3,16 @@
 Thread-safe context for TracePipe state.
 
 Each thread gets its own context via threading.local().
+
+Modes:
+- CI: Fast stats and drop tracking for production/CI use.
+- DEBUG: Full provenance with merge origin tracking and ghost row values.
 """
 
 import threading
 from typing import Optional
 
-from .core import TracePipeConfig
+from .core import TracePipeConfig, TracePipeMode
 from .storage.base import (
     LineageBackend,
     RowIdentityStrategy,
@@ -33,6 +37,10 @@ class TracePipeContext:
     Extensibility:
     - Pass custom `backend` for alternative storage (SQLite, Delta Lake)
     - Pass custom `identity` for alternative engines (Polars, Spark)
+
+    Mode System:
+    - CI mode (default): Fast stats, drop tracking, contracts
+    - DEBUG mode: Full merge provenance, ghost values, cell history
     """
 
     def __init__(
@@ -57,6 +65,18 @@ class TracePipeContext:
 
         # GroupBy state stack (supports nesting)
         self._groupby_stack: list[dict] = []
+
+    # === MODE CONVENIENCE PROPERTIES ===
+
+    @property
+    def is_debug_mode(self) -> bool:
+        """True if running in DEBUG mode."""
+        return self.config.mode == TracePipeMode.DEBUG
+
+    @property
+    def is_ci_mode(self) -> bool:
+        """True if running in CI mode (default)."""
+        return self.config.mode == TracePipeMode.CI
 
     def push_groupby(self, state: dict) -> None:
         """Push groupby state for nested operations."""
