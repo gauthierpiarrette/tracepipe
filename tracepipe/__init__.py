@@ -81,7 +81,7 @@ from .core import TracePipeConfig, TracePipeMode
 from .snapshot import DiffResult, Snapshot, diff, snapshot
 
 # === VERSION ===
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 # === MINIMAL __all__ ===
 __all__ = [

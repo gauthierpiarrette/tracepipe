@@ -710,7 +710,7 @@ class InMemoryLineageStore:
         diffs = list(self._iter_all_diffs())
 
         data = {
-            "tracepipe_version": "0.3.0",
+            "tracepipe_version": "0.3.1",
             "export_timestamp": time.time(),
             "total_diffs": len(diffs),
             "total_steps": len(self._steps),
