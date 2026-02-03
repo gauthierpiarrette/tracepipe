@@ -5,6 +5,18 @@ All notable changes to TracePipe will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.3.4 - 2026-02-03
+
+### Fixed
+- **Event deduplication**: Identical events from parallel pipelines are now deduplicated
+  - When multiple DataFrames share row IDs (e.g., from `df.copy()`), same changes are recorded once
+  - Events deduplicated by `(col, old_val, new_val, operation)` signature
+  - Prevents "4 events" when only 1 logical change occurred
+
+### Added
+- `_stable_repr()` helper for robust value comparison in deduplication
+- Tests for cross-pipeline event deduplication behavior
+
 ## 0.3.3 - 2026-02-03
 
 ### Fixed

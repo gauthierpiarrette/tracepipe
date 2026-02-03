@@ -350,6 +350,57 @@ class TestNoDoubleLogging:
             f"History: {result.history}"
         )
 
+    def test_cross_pipeline_identical_change_deduplication(self):
+        """Identical changes from parallel pipelines should be deduplicated.
+
+        When multiple pipelines from the same source do the SAME transformation
+        (e.g., both do fillna(0)), the event should only appear once.
+        """
+        tp.enable(mode="debug", watch=["income"])
+
+        # Source data with a row that has None income
+        customers = pd.DataFrame({"id": ["A", "B"], "income": [None, 100.0]})
+
+        # Two parallel pipelines doing the SAME transformation
+        df1 = customers.copy()
+        df1["income"] = df1["income"].fillna(0)  # Records None -> 0
+
+        df2 = customers.copy()
+        df2["income"] = df2["income"].fillna(0)  # Records SAME None -> 0
+
+        # Query df1 - should deduplicate identical events
+        result1 = tp.why(df1, col="income", row=0)
+        assert result1.n_changes == 1, (
+            f"Identical events should be deduplicated. Got {result1.n_changes}. "
+            f"History: {result1.history}"
+        )
+
+    def test_cross_pipeline_different_changes_preserved(self):
+        """Different changes from parallel pipelines should NOT be deduplicated.
+
+        When pipelines do DIFFERENT transformations on the same row,
+        both events should be visible (this is expected behavior - row IDs
+        are shared, so history includes all changes to that row ID).
+        """
+        tp.enable(mode="debug", watch=["income"])
+
+        customers = pd.DataFrame({"id": ["A", "B"], "income": [None, 100.0]})
+
+        # Two pipelines doing DIFFERENT transformations
+        df1 = customers.copy()
+        df1["income"] = df1["income"].fillna(0)  # None -> 0
+
+        df2 = customers.copy()
+        df2["income"] = df2["income"].fillna(99)  # None -> 99
+
+        # Query df1 - since row ID is shared, both changes are visible
+        # This is expected: deduplication only removes IDENTICAL events
+        result1 = tp.why(df1, col="income", row=0)
+        assert result1.n_changes == 2, (
+            f"Different changes should both be visible. Got {result1.n_changes}. "
+            f"History: {result1.history}"
+        )
+
 
 class TestMergeWarningScoping:
     """Tests for merge warnings being scoped to df's lineage."""

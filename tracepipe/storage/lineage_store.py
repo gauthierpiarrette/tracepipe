@@ -32,6 +32,22 @@ from ..core import (
 from ..utils.value_capture import capture_typed_value
 
 
+def _stable_repr(val) -> str:
+    """Create a stable string representation for deduplication.
+
+    Handles NaN, None, and other values that don't compare equal to themselves.
+    """
+    if val is None:
+        return "None"
+    # Handle NaN (which doesn't equal itself)
+    try:
+        if isinstance(val, float) and val != val:  # NaN check
+            return "NaN"
+    except (TypeError, ValueError):
+        pass
+    return repr(val)
+
+
 class InMemoryLineageStore:
     """
     Columnar storage for lineage data using Structure of Arrays (SoA).
@@ -556,12 +572,15 @@ class InMemoryLineageStore:
         Follows merge lineage recursively to build complete cell provenance.
         This is essential for tracking changes that happened before merge operations.
 
+        Deduplicates events by (col, old_val, new_val, operation) signature to prevent
+        cross-pipeline contamination when multiple DataFrames share row IDs.
+
         Args:
             row_id: Row ID to trace
             max_depth: Maximum merge depth to follow (prevents infinite loops)
 
         Returns:
-            List of events in chronological order, including parent row events.
+            List of UNIQUE events in chronological order, including parent row events.
         """
         visited: set[int] = set()
 
@@ -589,7 +608,23 @@ class InMemoryLineageStore:
         # Sort by step_id to ensure chronological order across lineage
         all_events.sort(key=lambda e: e["step_id"])
 
-        return all_events
+        # Deduplicate by (col, old_val, new_val, operation) signature
+        # This prevents cross-pipeline contamination when multiple DataFrames
+        # share the same row IDs (e.g., df.copy() followed by parallel transforms)
+        seen_signatures: set[tuple] = set()
+        unique_events = []
+        for event in all_events:
+            sig = (
+                event.get("col"),
+                _stable_repr(event.get("old_val")),
+                _stable_repr(event.get("new_val")),
+                event.get("operation"),
+            )
+            if sig not in seen_signatures:
+                seen_signatures.add(sig)
+                unique_events.append(event)
+
+        return unique_events
 
     def get_cell_history_with_lineage(
         self, row_id: int, column: str, max_depth: int = 10
