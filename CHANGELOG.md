@@ -5,6 +5,49 @@ All notable changes to TracePipe will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.4.0 - 2026-02-04
+
+### Added
+- **Full row provenance for `pd.concat(axis=0)`**: Row IDs are now preserved through concatenation
+  - Each result row maintains its original RID from the source DataFrame
+  - `ConcatMapping` tracks which source DataFrame each row came from
+  - Concat steps are now marked `FULL` completeness (previously `PARTIAL`)
+
+- **Duplicate drop provenance in debug mode**: `drop_duplicates` now tracks which row "won"
+  - `DuplicateDropMapping` maps dropped rows to their kept representative
+  - Supports `keep='first'`, `keep='last'`, and `keep=False`
+  - Uses `hash_pandas_object` for fast, NaN-safe key comparison
+
+- **Clean `TraceResult` API for provenance** (UX improvement):
+  - `trace.origin` — Unified origin info: `{"type": "concat", "source_df": 1}` or `{"type": "merge", "left_parent": 10, "right_parent": 20}`
+  - `trace.representative` — For dedup-dropped rows: `{"kept_rid": 42, "subset": ["key"], "keep": "first"}`
+  - No need to access internal `.store` methods — everything is in `tp.trace()` result
+
+- **New data structures in `core.py`**:
+  - `ConcatMapping`: Tracks row provenance through concat operations
+  - `DuplicateDropMapping`: Tracks dropped->kept relationships in drop_duplicates
+
+- **Comprehensive test suite**: 38 new tests in `test_row_provenance.py` covering:
+  - Concat RID preservation, ignore_index, after sort, with empty DFs, chained concats
+  - Axis=1 same-RID propagation vs different-RID PARTIAL marking
+  - Drop_duplicates keep='first'/'last'/False mapping correctness
+  - NaN handling parity with pandas `duplicated()`
+  - Integration: concat→merge, filter→concat, dedup→fillna lineage
+  - TraceResult `.origin` and `.representative` property tests
+
+### Changed
+- `wrap_concat_with_lineage` rewritten for full provenance tracking
+  - Captures source RIDs before operation
+  - Propagates RIDs (not new registration) for axis=0
+  - Stores positional + sorted arrays for both "explain row i" and O(log n) lookup
+  - Axis=1 propagates RIDs if all inputs match, otherwise PARTIAL
+
+- `_capture_filter_with_mask` enhanced to store `DuplicateDropMapping` in debug mode
+
+- `TraceResult` enhanced with `.origin` and `.representative` properties
+  - `.to_text()` now displays origin and representative info
+  - `.to_dict()` includes all provenance info
+
 ## 0.3.5 - 2026-02-03
 
 ### Fixed
