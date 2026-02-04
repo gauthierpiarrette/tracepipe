@@ -5,6 +5,16 @@ All notable changes to TracePipe will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-02-04
+
+### Fixed
+- Fully implemented `CheckResult` convenience properties (`.passed`, `.retention`, `.n_dropped`, `.n_steps`, `.drops_by_op`)
+- Added comprehensive tests for `CheckResult` API to ensure properties work correctly
+- Properties now properly access underlying `.facts` dictionary for all metrics
+
+### Changed
+- Cleaned up example files and test scripts
+
 ## [0.4.0] - 2026-02-04
 
 ### Added
