@@ -179,6 +179,46 @@ class DebugInspector:
         ctx = get_context()
         return ctx.row_manager.get_ghost_rows(limit=limit)
 
+    def get_ghost_values(self, row_id: int) -> dict[str, Any] | None:
+        """
+        Get last-known values for a specific dropped row (DEBUG mode only).
+
+        Args:
+            row_id: The row ID to look up
+
+        Returns:
+            Dict mapping column names to their last known values,
+            or None if the row was not found in ghost storage.
+
+        Example:
+            dbg = tp.debug.inspect()
+            dropped_rid = list(dbg.dropped_rows())[0]
+            ghost = dbg.get_ghost_values(dropped_rid)
+            print(f"Last known values: {ghost}")
+        """
+        ctx = get_context()
+        ghost_df = ctx.row_manager.get_ghost_rows(limit=100000)
+
+        if ghost_df.empty or "__tp_row_id__" not in ghost_df.columns:
+            return None
+
+        row_match = ghost_df[ghost_df["__tp_row_id__"] == row_id]
+        if row_match.empty:
+            return None
+
+        # Convert to dict and remove internal columns
+        result = row_match.iloc[0].to_dict()
+        internal_cols = [
+            "__tp_row_id__",
+            "__tp_dropped_by__",
+            "__tp_dropped_step__",
+            "__tp_original_position__",
+        ]
+        for col in internal_cols:
+            result.pop(col, None)
+
+        return result
+
     def stats(self) -> dict:
         """Get comprehensive tracking statistics."""
         ctx = get_context()
