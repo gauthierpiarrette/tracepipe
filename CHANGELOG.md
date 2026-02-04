@@ -5,6 +5,27 @@ All notable changes to TracePipe will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.4.2 - 2026-02-04
+
+### Fixed
+- **Documentation/Implementation alignment**: Major fixes to ensure API matches documentation
+- `CheckResult` now exposes `.n_changes` and `.changes_by_op` for cell-level change tracking
+- `TraceResult` now has `.status` property returning "alive" or "dropped" string
+- `TraceResult` now has `.dropped_by` and `.dropped_at_step` convenience properties
+- `DiffResult` now includes `cells_changed`, `changes_by_column`, `changed_rows`, `columns_added`, `columns_removed`
+- `tp.trace()` and `tp.why()` now correctly interpret `row=` as DataFrame position (0-based index)
+- Added `row_id=` parameter to `tp.trace()` and `tp.why()` for tracing dropped rows by internal ID
+
+### Added
+- `DebugInspector.get_ghost_values(row_id)` method to retrieve last-known values for a specific dropped row
+- Comprehensive test suite (`test_doc_api_alignment.py`) validating API matches documentation
+- Cell-level diff support in `DiffResult` when snapshots are created with `include_values=True`
+
+### Changed
+- `CheckResult.to_text()` now shows compact metrics (retention, dropped, changes) before verbose details
+- Documentation updated to accurately reflect v0.4.x API behavior
+- `TraceResult.to_text()` output now matches documented format
+
 ## 0.4.1 - 2026-02-04
 
 ### Fixed
