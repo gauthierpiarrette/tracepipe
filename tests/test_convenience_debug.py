@@ -333,10 +333,14 @@ class TestTraceResult:
         tp.enable(mode="debug")
         df = pd.DataFrame({"a": [1, None, 3]})
         df = df.dropna()
-        result = tp.trace(df, row=1)
+        # Use row_id parameter to trace a dropped row by its internal ID
+        dbg = tp.debug.inspect()
+        dropped = dbg.dropped_rows()
+        assert len(dropped) >= 1
+        result = tp.trace(df, row_id=dropped[0])
         assert result.is_alive is False
         text = str(result)
-        assert "Dropped" in text or "X" in text
+        assert "Dropped" in text or "DROPPED" in text
 
     def test_trace_with_events(self):
         """TraceResult shows events when cell is modified."""
@@ -386,7 +390,11 @@ class TestTraceResult:
         tp.enable(mode="debug", watch=["a"])
         df = pd.DataFrame({"a": [1, 2, 3]})
         df = df.head(1)  # Drop rows 1 and 2
-        result = tp.trace(df, row=1)  # Trace dropped row
+        # Use row_id parameter to trace a dropped row
+        dbg = tp.debug.inspect()
+        dropped = dbg.dropped_rows()
+        assert len(dropped) >= 1
+        result = tp.trace(df, row_id=dropped[0])  # Trace dropped row by ID
         # Dropped row should have ghost values in debug mode
         text = result.to_text(verbose=True)
         assert result.is_alive is False

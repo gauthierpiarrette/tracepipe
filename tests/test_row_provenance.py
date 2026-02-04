@@ -569,10 +569,8 @@ class TestTraceResultOriginProperty:
 
         result = df1.merge(df2, on="key")
 
-        # Use the actual row_id from the result DataFrame
-        ctx = get_context()
-        result_rids = ctx.row_manager.get_ids_array(result)
-        trace = tp.trace(result, row=result_rids[0])
+        # Use row=0 to trace the first row in the result DataFrame
+        trace = tp.trace(result, row=0)
 
         # Should have merge origin
         assert trace.origin is not None

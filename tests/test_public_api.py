@@ -100,8 +100,13 @@ class TestTrace:
         tp.enable(mode="debug")
         df = pd.DataFrame({"a": [1, None, 3]})
         df = df.dropna()
-        result = tp.trace(df, row=1)
+        # Use row_id parameter to trace dropped row
+        dbg = tp.debug.inspect()
+        dropped = dbg.dropped_rows()
+        assert len(dropped) >= 1
+        result = tp.trace(df, row_id=dropped[0])
         assert result is not None
+        assert result.is_alive is False
 
     def test_trace_with_where(self):
         """trace() with where clause."""
