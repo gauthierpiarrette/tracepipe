@@ -68,6 +68,28 @@ When rows are aggregated:
 grouped = df.groupby("category").sum()  # GROUP event with membership
 ```
 
+### Concat Events (v0.4+)
+
+When DataFrames are concatenated, row IDs are preserved:
+
+```python
+df1 = pd.DataFrame({"a": [1, 2]})  # Rows get IDs: 0, 1
+df2 = pd.DataFrame({"a": [3, 4]})  # Rows get IDs: 2, 3
+
+result = pd.concat([df1, df2])  # IDs preserved: 0, 1, 2, 3
+# TracePipe tracks which source DataFrame each row came from
+```
+
+### Duplicate Drop Events (v0.4+)
+
+In debug mode, `drop_duplicates` tracks which row was kept as representative:
+
+```python
+df = pd.DataFrame({"key": ["A", "A", "B"], "val": [1, 2, 3]})
+df = df.drop_duplicates(subset=["key"], keep="first")
+# Row with val=2 was dropped, mapped to representative (val=1)
+```
+
 ---
 
 ## The Lineage Store

@@ -159,12 +159,14 @@ print(tp.why(df, "price", 0))  # Why price changed
 
 | Operation | Tracking | Completeness |
 |-----------|----------|--------------|
-| `dropna`, `drop_duplicates` | Dropped row IDs | Full |
-| `query`, `df[mask]` | Dropped row IDs | Full |
+| `dropna`, `query`, `df[mask]` | Dropped row IDs | Full |
+| `drop_duplicates` | Dropped→kept mapping (debug mode) | Full |
 | `head`, `tail`, `sample` | Dropped row IDs | Full |
 | `fillna`, `replace` | Cell diffs (watched cols) | Full |
 | `loc[]=`, `iloc[]=`, `at[]=` | Cell diffs | Full |
 | `merge`, `join` | Parent tracking | Full |
+| `pd.concat(axis=0)` | Row IDs + source DataFrame | Full |
+| `pd.concat(axis=1)` | Row IDs (if aligned) | Partial |
 | `groupby().agg()` | Group membership | Full |
 | `apply`, `pipe` | Output tracked | Partial |
 

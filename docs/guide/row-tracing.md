@@ -109,6 +109,70 @@ if trace.merge_parents:
     print(f"Right parent: {trace.merge_parents.right}")
 ```
 
+---
+
+## Concat Origin Tracking (v0.4+)
+
+When rows come from concatenated DataFrames, TracePipe tracks their source via `trace.origin`:
+
+```python
+df1 = pd.DataFrame({"a": [1, 2]})
+df2 = pd.DataFrame({"a": [3, 4]})
+result = pd.concat([df1, df2])
+
+# Trace a row that came from df2
+trace = tp.trace(result, row=2)
+print(trace.origin)
+# {"type": "concat", "source_df": 1, "step_id": 5}
+```
+
+The `.origin` property returns a unified dict with:
+
+- `type`: `"concat"`, `"merge"`, or `None` (for original rows)
+- `source_df`: Index in the concat list (0=first DataFrame, 1=second, etc.)
+- `step_id`: Which pipeline step
+
+Row IDs are preserved through `pd.concat(axis=0)`, so lineage chains correctly:
+
+```python
+# Transform df1 before concat
+df1["a"] = df1["a"].fillna(0)
+
+result = pd.concat([df1, df2])
+
+# Rows from df1 still have their fillna history
+trace = tp.trace(result, row=0)  # Shows fillna event from df1
+```
+
+---
+
+## Duplicate Representative Tracking (v0.4+)
+
+When `drop_duplicates` removes rows, TracePipe tracks which row "won" via `trace.representative`:
+
+```python
+df = pd.DataFrame({
+    "key": ["A", "A", "B"],
+    "value": [100, 200, 300]
+})
+df = df.drop_duplicates(subset=["key"], keep="first")
+
+# Trace the dropped row (value=200)
+trace = tp.trace(df, row=dropped_row_id)
+print(trace.representative)
+# {"kept_rid": 42, "subset": ["key"], "keep": "first"}
+```
+
+The `.representative` property is only set for rows dropped by `drop_duplicates`:
+
+| `keep` Strategy | `.representative` |
+|-----------------|-------------------|
+| `keep='first'` | `{"kept_rid": 42, ...}` — first occurrence kept |
+| `keep='last'` | `{"kept_rid": 45, ...}` — last occurrence kept |
+| `keep=False` | `{"kept_rid": None, ...}` — all duplicates removed |
+
+This answers "why did this row disappear?" — it wasn't deleted, it was deduplicated.
+
 ## Performance Considerations
 
 - Row tracing in CI mode is limited (no individual row IDs)

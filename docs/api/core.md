@@ -86,6 +86,9 @@ Manually register DataFrames for tracking.
 
 Use this when DataFrames are created before `tp.enable()` is called.
 
+!!! note "Lineage Break"
+    Calling `register()` assigns new row IDs, which breaks lineage from any prior transformations. Use it only for "entry point" DataFrames.
+
 **Parameters:**
 
 | Parameter | Type | Description |
@@ -209,9 +212,11 @@ Trace a row's journey through the pipeline.
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | `.row_id` | `int` | Internal row ID |
-| `.status` | `str` | `"alive"` or `"dropped"` |
+| `.is_alive` | `bool` | True if row exists in current DataFrame |
 | `.events` | `list` | All events for this row |
-| `.dropped_by` | `str` | Operation that dropped (if dropped) |
+| `.dropped_at` | `dict` | Operation that dropped (if dropped) |
+| `.origin` | `dict` | Where row came from: `{"type": "concat", "source_df": 1}` or `{"type": "merge", "left_parent": 10, "right_parent": 20}` |
+| `.representative` | `dict` | If dropped by dedup: `{"kept_rid": 42, "subset": [...], "keep": "first"}` |
 
 **Example:**
 
