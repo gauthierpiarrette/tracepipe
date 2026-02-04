@@ -191,7 +191,7 @@ def create_sample_data():
             ),
             "order_date": pd.to_datetime(
                 [
-                    f"2024-{np.random.randint(1,13):02d}-{np.random.randint(1,29):02d}"
+                    f"2024-{np.random.randint(1, 13):02d}-{np.random.randint(1, 29):02d}"
                     for _ in range(50)
                 ]
             ),

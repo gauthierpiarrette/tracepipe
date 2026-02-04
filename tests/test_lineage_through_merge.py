@@ -199,10 +199,9 @@ class TestEnableStateReset:
         n_warnings_second = len([w for w in result2.warnings if "duplicate" in w.message.lower()])
 
         # Should NOT have 2x warnings
-        assert n_warnings_second == n_warnings_first, (
-            f"Expected {n_warnings_first} duplicate warnings, "
-            f"got {n_warnings_second} (accumulated)"
-        )
+        assert (
+            n_warnings_second == n_warnings_first
+        ), f"Expected {n_warnings_first} duplicate warnings, got {n_warnings_second} (accumulated)"
 
     def test_watched_columns_reset_on_new_watch(self):
         """When watch param is provided, old watched columns should be cleared."""
@@ -366,10 +365,9 @@ class TestNoDoubleLogging:
 
         result = tp.why(df, col="val", row=0)
 
-        assert result.n_changes == 1, (
-            f"Expected exactly 1 change event, got {result.n_changes}. "
-            f"History: {result.history}"
-        )
+        assert (
+            result.n_changes == 1
+        ), f"Expected exactly 1 change event, got {result.n_changes}. History: {result.history}"
 
     def test_cross_pipeline_identical_change_deduplication(self):
         """Identical changes from parallel pipelines should be deduplicated.
