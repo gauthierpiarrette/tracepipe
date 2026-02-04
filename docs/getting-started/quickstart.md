@@ -43,13 +43,24 @@ Output:
 TracePipe Check: [OK] Pipeline healthy
   Mode: debug
 
-Retention: 2/4 (50.0%)
+Retention: 50%
 Dropped: 2 rows
   • DataFrame.dropna: 1
   • DataFrame.__getitem__[mask]: 1
 
 Value changes: 2 cells
   • DataFrame.__setitem__[total]: 2
+```
+
+The `CheckResult` object provides convenient properties:
+
+```python
+result.passed       # True/False
+result.retention    # 0.5 (row retention rate)
+result.n_dropped    # 2 (total dropped rows)
+result.drops_by_op  # {"DataFrame.dropna": 1, ...}
+result.n_changes    # 2 (cell changes, debug mode only)
+result.changes_by_op # {"DataFrame.__setitem__[total]": 2}
 ```
 
 ## 4. Trace a Row's Journey

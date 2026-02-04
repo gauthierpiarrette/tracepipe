@@ -140,9 +140,17 @@ For dropped rows, you can still query their last known values:
 ```python
 dbg = tp.debug.inspect()
 
-# Get ghost values for a dropped row
+# Get ghost values for a specific dropped row
 dropped_rid = list(dbg.dropped_rows())[0]
 ghost = dbg.get_ghost_values(dropped_rid)
-
 print(f"Last known values: {ghost}")
+# {"age": 25, "salary": 50000}
+
+# Or get all ghost rows as a DataFrame
+ghost_df = dbg.ghost_rows()
+print(ghost_df)
+# DataFrame with __tp_row_id__, __tp_dropped_by__, and watched columns
 ```
+
+The `get_ghost_values(row_id)` method returns a dict mapping column names to
+their last known values, or `None` if the row wasn't found in ghost storage.

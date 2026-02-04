@@ -20,11 +20,14 @@ Output:
 Row 42 Journey:
   Status: [OK] Alive
 
-  Events: 3
-    [SURVIVED] DataFrame.dropna
+  Events: 1
     [MODIFIED] DataFrame.fillna: income
-    [SURVIVED] DataFrame.__getitem__[mask]
 ```
+
+!!! note "Event Recording"
+    TracePipe records MODIFIED events for cells that change in watched columns.
+    Rows that pass through operations unchanged are not recorded as separate events
+    (they are implicitly "survived"). Drop events are recorded for filtered rows.
 
 ## The TraceResult Object
 
@@ -34,11 +37,16 @@ trace = tp.trace(df, row=0)
 # Access fields
 trace.row_id           # int: internal row ID
 trace.status           # str: "alive" or "dropped"
-trace.events           # list[TraceEvent]: all events
+trace.is_alive         # bool: True if row still exists
+trace.events           # list[dict]: all events for this row
 
 # For dropped rows
 trace.dropped_by       # str: operation that dropped the row
 trace.dropped_at_step  # int: step number
+
+# Provenance (v0.4+)
+trace.origin           # dict: {"type": "concat"|"merge", ...} or None
+trace.representative   # dict: for dedup-dropped rows, which row was kept
 
 # Export
 trace.to_dict()        # dict representation
@@ -74,10 +82,16 @@ tp.trace(df, where={"email": None})
 
 | Event Type | Description |
 |------------|-------------|
-| `SURVIVED` | Row passed through operation unchanged |
-| `MODIFIED` | One or more cells changed |
-| `DROPPED` | Row was removed |
-| `CREATED` | Row first appeared (e.g., from merge) |
+| `MODIFIED` | One or more cells changed in watched columns |
+| `DROPPED` | Row was removed by a filter operation |
+
+!!! note "Design Note"
+    TracePipe does not explicitly record "SURVIVED" events because they would
+    create excessive noise for most pipelines. Instead, rows that exist in the
+    final DataFrame are implicitly considered to have survived all operations.
+
+    If you need to know which operations a row passed through, check the
+    `steps` list via `tp.debug.inspect().steps`.
 
 ## Tracing Dropped Rows
 

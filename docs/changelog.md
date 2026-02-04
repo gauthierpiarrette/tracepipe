@@ -5,6 +5,27 @@ All notable changes to TracePipe will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-02-04
+
+### Fixed
+- **`CheckResult` change tracking**: Added `n_changes` and `changes_by_op` properties in debug mode to track value changes across pipeline steps
+- **`TraceResult` status fields**: Added `status`, `dropped_by`, and `dropped_at_step` properties for clearer dropped row analysis
+- **`DiffResult` completeness**: Added `cells_changed`, `changes_by_column`, `rows_unchanged`, and `changed_rows` for detailed snapshot comparison
+- **Ghost value API**: Implemented `dbg.get_ghost_values(row_id)` for retrieving last known values of dropped rows
+- **Merge provenance**: `trace.origin` and `trace.merge_origin` now properly populated for merged rows
+- **Documentation alignment**: All documented APIs now match actual implementation with comprehensive test coverage
+
+### Changed
+- **`tp.trace()` API enhancement**: Added `row_id=` parameter for explicit internal row ID tracking
+  - `row=` now strictly refers to DataFrame positional index
+  - `row_id=` refers to TracePipe's internal row identifier (stable across operations)
+  - Supports tracing dropped rows by ID: `tp.trace(df, row_id=42)`
+- **`tp.why()` API enhancement**: Added `row_id=` parameter matching `tp.trace()` signature
+
+### Added
+- Comprehensive test suite (`test_doc_api_alignment.py`) with 27 tests validating documented API features
+- Better error messages for out-of-bounds row access
+
 ## [0.4.1] - 2026-02-04
 
 ### Fixed

@@ -34,13 +34,16 @@ Output:
 
 ```
 Snapshot Diff:
-  Rows: 1000 → 847 (-153)
-  Columns: ['id', 'price', 'qty'] → ['id', 'price', 'qty'] (unchanged)
+  - 153 rows removed
+  ! 153 new drops
 
   Changes:
-    - 153 rows removed
-    - 847 cells modified in 'price'
+    - 847 cells modified
+      price: 847
 ```
+
+!!! tip "Enabling Cell-Level Diff"
+    To see cell-level changes, create snapshots with `include_values=True`.
 
 ## The Snapshot Object
 
@@ -64,20 +67,37 @@ snapshot.data          # DataFrame copy (if captured)
 ```python
 diff = tp.diff(before, after)
 
-# Access fields
-diff.rows_added        # int: new rows
-diff.rows_removed      # int: removed rows
-diff.rows_unchanged    # int: unchanged rows
-diff.cells_changed     # int: modified cells
+# Row-level changes (always available)
+diff.rows_added        # set[int]: IDs of new rows
+diff.rows_removed      # set[int]: IDs of removed rows
+diff.new_drops         # set[int]: newly dropped row IDs
+diff.recovered_rows    # set[int]: rows that were dropped but now exist
 
 # Column changes
 diff.columns_added     # list[str]: new columns
 diff.columns_removed   # list[str]: removed columns
 
-# Detailed changes (if both snapshots have data)
-diff.changed_rows      # set[int]: IDs of changed rows
+# Cell-level changes (requires include_values=True on both snapshots)
+diff.cells_changed     # int: total modified cells
+diff.changed_rows      # set[int]: IDs of rows with value changes
 diff.changes_by_column # dict: {col: count}
+
+# Stats changes
+diff.stats_changes     # dict: {col: {metric: (old, new)}}
+diff.drops_delta       # dict: {operation: delta_count}
 ```
+
+!!! note "Cell-Level Diff Requirements"
+    To get `cells_changed` and `changes_by_column`, both snapshots must be
+    created with `include_values=True`:
+
+    ```python
+    before = tp.snapshot(df, include_values=True)
+    # ... operations ...
+    after = tp.snapshot(df, include_values=True)
+    diff = tp.diff(before, after)
+    print(f"{diff.cells_changed} cells modified")
+    ```
 
 ## Options
 
