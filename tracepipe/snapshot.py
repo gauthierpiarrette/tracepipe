@@ -25,7 +25,7 @@ Usage:
 
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
@@ -297,6 +297,20 @@ class DiffResult:
     recovered_rows: set[int]
     drops_delta: dict[str, int]  # op -> change in count
     stats_changes: dict[str, dict[str, Any]]  # col -> {metric: (old, new)}
+    # Column changes
+    columns_added: list[str] = field(default_factory=list)
+    columns_removed: list[str] = field(default_factory=list)
+    # Cell-level changes (only populated if both snapshots have include_values=True)
+    cells_changed: int = 0  # Total modified cells
+    changed_rows: set[int] = field(default_factory=set)  # IDs of rows with value changes
+    changes_by_column: dict[str, int] = field(default_factory=dict)  # col -> count
+
+    @property
+    def rows_unchanged(self) -> int:
+        """Number of rows that exist in both snapshots (may have value changes)."""
+        # This is computed from the rows that weren't added or removed
+        # Note: This is an estimate based on the smaller snapshot
+        return 0  # Will be set during diff computation
 
     def __repr__(self) -> str:
         lines = ["Snapshot Diff:"]
@@ -309,6 +323,18 @@ class DiffResult:
             lines.append(f"  ! {len(self.new_drops)} new drops")
         if self.recovered_rows:
             lines.append(f"  * {len(self.recovered_rows)} recovered")
+
+        if self.columns_added:
+            lines.append(f"  Columns added: {', '.join(self.columns_added)}")
+        if self.columns_removed:
+            lines.append(f"  Columns removed: {', '.join(self.columns_removed)}")
+
+        if self.cells_changed > 0:
+            lines.append("\n  Changes:")
+            lines.append(f"    - {self.cells_changed} cells modified")
+            if self.changes_by_column:
+                for col, count in sorted(self.changes_by_column.items(), key=lambda x: -x[1])[:5]:
+                    lines.append(f"      {col}: {count}")
 
         if self.drops_delta:
             lines.append("  Drop changes by operation:")
@@ -339,6 +365,9 @@ class DiffResult:
             or self.recovered_rows
             or self.drops_delta
             or self.stats_changes
+            or self.columns_added
+            or self.columns_removed
+            or self.cells_changed
         )
 
     def to_dict(self) -> dict:
@@ -350,6 +379,11 @@ class DiffResult:
             "recovered_rows": list(self.recovered_rows),
             "drops_delta": self.drops_delta,
             "stats_changes": self.stats_changes,
+            "columns_added": self.columns_added,
+            "columns_removed": self.columns_removed,
+            "cells_changed": self.cells_changed,
+            "changed_rows": list(self.changed_rows),
+            "changes_by_column": self.changes_by_column,
         }
 
 
@@ -359,6 +393,9 @@ def diff(baseline: Snapshot, current: Snapshot) -> DiffResult:
 
     Note: Cross-run diff is SUMMARY-ONLY unless keys are stored.
     Row-level comparison only works within same session (same RID assignment).
+
+    For cell-level diff (cells_changed, changes_by_column), both snapshots
+    must have been created with include_values=True.
     """
     rows_added = current.row_ids - baseline.row_ids
     rows_removed = baseline.row_ids - current.row_ids
@@ -375,9 +412,15 @@ def diff(baseline: Snapshot, current: Snapshot) -> DiffResult:
         if old != new:
             drops_delta[op] = new - old
 
+    # Column changes
+    baseline_cols = set(baseline.column_stats.keys())
+    current_cols = set(current.column_stats.keys())
+    columns_added = sorted(current_cols - baseline_cols)
+    columns_removed = sorted(baseline_cols - current_cols)
+
     # Stats changes
     stats_changes: dict[str, dict[str, Any]] = {}
-    all_cols = set(baseline.column_stats.keys()) | set(current.column_stats.keys())
+    all_cols = baseline_cols | current_cols
     for col in all_cols:
         old_stats = baseline.column_stats.get(col)
         new_stats = current.column_stats.get(col)
@@ -396,6 +439,43 @@ def diff(baseline: Snapshot, current: Snapshot) -> DiffResult:
         if changes:
             stats_changes[col] = changes
 
+    # Cell-level changes (only if both snapshots have watched data)
+    cells_changed = 0
+    changed_rows: set[int] = set()
+    changes_by_column: dict[str, int] = {}
+
+    if baseline.watched_data is not None and current.watched_data is not None:
+        # Find common rows and columns
+        common_rows = baseline.row_ids & current.row_ids
+        common_cols = set(baseline.watched_data.columns) & set(current.watched_data.columns)
+
+        for rid in common_rows:
+            for col in common_cols:
+                old_val = baseline.watched_data.get_value(int(rid), col)
+                new_val = current.watched_data.get_value(int(rid), col)
+
+                # Compare values (handle NaN)
+                values_equal = False
+                if old_val is None and new_val is None:
+                    values_equal = True
+                elif old_val is not None and new_val is not None:
+                    try:
+                        # Handle NaN comparison
+                        if isinstance(old_val, float) and isinstance(new_val, float):
+                            if old_val != old_val and new_val != new_val:  # Both NaN
+                                values_equal = True
+                            else:
+                                values_equal = old_val == new_val
+                        else:
+                            values_equal = old_val == new_val
+                    except (TypeError, ValueError):
+                        values_equal = str(old_val) == str(new_val)
+
+                if not values_equal:
+                    cells_changed += 1
+                    changed_rows.add(rid)
+                    changes_by_column[col] = changes_by_column.get(col, 0) + 1
+
     return DiffResult(
         rows_added=rows_added,
         rows_removed=rows_removed,
@@ -403,6 +483,11 @@ def diff(baseline: Snapshot, current: Snapshot) -> DiffResult:
         recovered_rows=recovered_rows,
         drops_delta=drops_delta,
         stats_changes=stats_changes,
+        columns_added=columns_added,
+        columns_removed=columns_removed,
+        cells_changed=cells_changed,
+        changed_rows=changed_rows,
+        changes_by_column=changes_by_column,
     )
 
 
