@@ -8,6 +8,7 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/tracepipe.svg)](https://pypi.org/project/tracepipe/)
 [![Python 3.9+](https://img.shields.io/pypi/pyversions/tracepipe.svg)](https://pypi.org/project/tracepipe/)
+[![pandas 1.5-2.2](https://img.shields.io/badge/pandas-1.5--2.2-blue.svg)](https://github.com/gauthierpiarrette/tracepipe/blob/main/tests/test_version_matrix.py)
 [![CI](https://github.com/gauthierpiarrette/tracepipe/actions/workflows/ci.yml/badge.svg)](https://github.com/gauthierpiarrette/tracepipe/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/gauthierpiarrette/tracepipe/branch/main/graph/badge.svg)](https://codecov.io/gh/gauthierpiarrette/tracepipe)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)

@@ -67,11 +67,11 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/tracepipe/tracepipe"
-Documentation = "https://tracepipe.github.io/tracepipe/"
-Repository = "https://github.com/tracepipe/tracepipe.git"
-Issues = "https://github.com/tracepipe/tracepipe/issues"
-Changelog = "https://tracepipe.github.io/tracepipe/changelog/"
+Homepage = "https://github.com/gauthierpiarrette/tracepipe"
+Documentation = "https://gauthierpiarrette.github.io/tracepipe/"
+Repository = "https://github.com/gauthierpiarrette/tracepipe.git"
+Issues = "https://github.com/gauthierpiarrette/tracepipe/issues"
+Changelog = "https://gauthierpiarrette.github.io/tracepipe/changelog/"
 
 [tool.hatch.build.targets.wheel]
 packages = ["tracepipe"]
