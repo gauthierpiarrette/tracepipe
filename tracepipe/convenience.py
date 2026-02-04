@@ -147,6 +147,10 @@ class TraceResult:
 
     Answers: "What happened to this row?"
     Events are in CHRONOLOGICAL order (oldest->newest).
+
+    Key attributes:
+        origin: Where this row came from (concat, merge, or original)
+        representative: If dropped by dedup, which row was kept instead
     """
 
     row_id: int
@@ -158,10 +162,55 @@ class TraceResult:
     # Mode enforcement
     supported: bool = True
     unsupported_reason: str | None = None
+    # v0.4+ provenance
+    concat_origin: dict[str, Any] | None = None
+    dedup_representative: dict[str, Any] | None = None
 
     @property
     def n_events(self) -> int:
         return len(self.events)
+
+    @property
+    def origin(self) -> dict[str, Any] | None:
+        """
+        Unified origin info: where did this row come from?
+
+        Returns dict with 'type' key:
+            - {"type": "concat", "source_df": 1, "step_id": 5}
+            - {"type": "merge", "left_parent": 10, "right_parent": 20, "step_id": 3}
+            - None if original row (not from concat/merge)
+        """
+        if self.concat_origin:
+            return {
+                "type": "concat",
+                "source_df": self.concat_origin.get("source_index"),
+                "step_id": self.concat_origin.get("step_id"),
+            }
+        if self.merge_origin:
+            return {
+                "type": "merge",
+                "left_parent": self.merge_origin.get("left_parent"),
+                "right_parent": self.merge_origin.get("right_parent"),
+                "step_id": self.merge_origin.get("step_id"),
+            }
+        return None
+
+    @property
+    def representative(self) -> dict[str, Any] | None:
+        """
+        If dropped by drop_duplicates, which row was kept instead?
+
+        Returns:
+            {"kept_rid": 42, "subset": ["key"], "keep": "first"} or None
+            kept_rid is None if keep=False (all duplicates dropped)
+        """
+        if not self.dedup_representative:
+            return None
+        return {
+            "kept_rid": self.dedup_representative.get("kept_rid"),
+            "subset": self.dedup_representative.get("subset_columns"),
+            "keep": self.dedup_representative.get("keep_strategy"),
+        }
 
     def to_dict(self) -> dict:
         """Export to dictionary."""
@@ -169,11 +218,14 @@ class TraceResult:
             "row_id": self.row_id,
             "is_alive": self.is_alive,
             "dropped_at": self.dropped_at,
-            "merge_origin": self.merge_origin,
+            "origin": self.origin,
+            "representative": self.representative,
             "n_events": self.n_events,
             "events": self.events,
             "ghost_values": self.ghost_values,
             "supported": self.supported,
+            # Keep legacy fields for backwards compatibility
+            "merge_origin": self.merge_origin,
         }
 
     def __repr__(self) -> str:
@@ -195,10 +247,28 @@ class TraceResult:
                     f"    at step {self.dropped_at['step_id']}: {self.dropped_at['operation']}"
                 )
 
-        if self.merge_origin:
-            left = self.merge_origin.get("left_parent", "?")
-            right = self.merge_origin.get("right_parent", "?")
-            lines.append(f"  Origin: merge of row {left} (left) + row {right} (right)")
+        # Display unified origin info
+        origin = self.origin
+        if origin:
+            if origin["type"] == "merge":
+                left = origin.get("left_parent", "?")
+                right = origin.get("right_parent", "?")
+                lines.append(f"  Origin: merge of row {left} (left) + row {right} (right)")
+            elif origin["type"] == "concat":
+                src = origin.get("source_df", "?")
+                lines.append(f"  Origin: concat from DataFrame #{src}")
+
+        # Display dedup representative if dropped by dedup
+        if self.representative:
+            kept = self.representative.get("kept_rid")
+            subset = self.representative.get("subset")
+            keep = self.representative.get("keep", "first")
+            if kept is not None:
+                subset_str = f" (key: {subset})" if subset else ""
+                lines.append(f"  Replaced by: row {kept}{subset_str} [keep={keep}]")
+            else:
+                subset_str = f" on {subset}" if subset else ""
+                lines.append(f"  Dropped: all duplicates removed{subset_str} [keep=False]")
 
         if len(self.events) == 0:
             lines.append("\n  Events: 0 (no changes to watched columns)")
@@ -787,6 +857,14 @@ def _build_trace_result(row_id: int, ctx, include_ghost: bool) -> TraceResult:
     drop_event = store.get_drop_event(row_id)
     merge_origin = store.get_merge_origin(row_id)
 
+    # v0.4+ provenance: concat origin and dedup representative
+    concat_origin = None
+    dedup_representative = None
+    if hasattr(store, "get_concat_origin"):
+        concat_origin = store.get_concat_origin(row_id)
+    if hasattr(store, "get_duplicate_representative"):
+        dedup_representative = store.get_duplicate_representative(row_id)
+
     # Use lineage-aware history to include pre-merge parent events
     if hasattr(store, "get_row_history_with_lineage"):
         history = store.get_row_history_with_lineage(row_id)
@@ -823,6 +901,8 @@ def _build_trace_result(row_id: int, ctx, include_ghost: bool) -> TraceResult:
         merge_origin=merge_origin,
         events=history,
         ghost_values=ghost_values,
+        concat_origin=concat_origin,
+        dedup_representative=dedup_representative,
     )
 
 

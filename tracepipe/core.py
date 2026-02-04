@@ -277,3 +277,82 @@ class MergeStats:
     left_dup_rate: float  # -1 if not computed
     right_dup_rate: float  # -1 if not computed
     how: str
+
+
+@dataclass
+class ConcatMapping:
+    """
+    Mapping for pd.concat operations preserving row lineage.
+
+    For axis=0 concat, each result row comes from exactly one source DataFrame.
+    Arrays are stored in both positional order (for "explain row i") and
+    sorted order (for O(log n) RID lookup).
+
+    Invariants:
+    - out_rids and source_indices have same length
+    - out_rids_sorted and out_pos_sorted are always paired (both set or both None)
+    - out_rids_sorted is monotonically increasing
+    """
+
+    step_id: int
+
+    # Positional arrays (match result row order)
+    out_rids: Any  # numpy array, len = len(result)
+    source_indices: Any  # numpy array, which source DF (0, 1, 2...) each row came from
+
+    # Sorted arrays (for O(log n) lookup by RID)
+    out_rids_sorted: Any  # numpy array, SORTED
+    out_pos_sorted: Any  # numpy array, original positions aligned with out_rids_sorted
+
+    # Metadata
+    source_shapes: list[tuple] = field(default_factory=list)
+
+    def __post_init__(self):
+        """Validate invariants."""
+        import numpy as np
+
+        if self.out_rids_sorted is not None and self.out_pos_sorted is not None:
+            if len(self.out_rids_sorted) != len(self.out_pos_sorted):
+                raise ValueError("out_rids_sorted and out_pos_sorted must have same length")
+            # Verify monotonic (debug check)
+            if len(self.out_rids_sorted) > 1:
+                assert np.all(
+                    self.out_rids_sorted[:-1] <= self.out_rids_sorted[1:]
+                ), "out_rids_sorted must be monotonically increasing"
+
+
+@dataclass
+class DuplicateDropMapping:
+    """
+    Mapping for drop_duplicates provenance (debug mode only).
+
+    Tracks which rows were dropped and which "representative" row they lost to.
+    Arrays are sorted by dropped_rids for O(log n) lookup.
+
+    For keep='first': dropped rows map to first occurrence
+    For keep='last': dropped rows map to last occurrence
+    For keep=False: dropped rows have kept_rids=-1 (no representative)
+    """
+
+    step_id: int
+
+    # Sorted arrays for O(log n) lookup
+    dropped_rids: Any  # numpy array, SORTED dropped row IDs
+    kept_rids: Any  # numpy array, representative RID for each dropped row (-1 if none)
+
+    # Metadata
+    subset_columns: Optional[tuple[str, ...]] = None
+    keep_strategy: str = "first"
+
+    def __post_init__(self):
+        """Validate invariants."""
+        import numpy as np
+
+        if self.dropped_rids is not None and self.kept_rids is not None:
+            if len(self.dropped_rids) != len(self.kept_rids):
+                raise ValueError("dropped_rids and kept_rids must have same length")
+            # Verify sorted
+            if len(self.dropped_rids) > 1:
+                assert np.all(
+                    self.dropped_rids[:-1] <= self.dropped_rids[1:]
+                ), "dropped_rids must be sorted"

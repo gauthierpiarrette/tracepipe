@@ -22,6 +22,8 @@ from ..core import (
     AggregationMapping,
     ChangeType,
     CompletenessLevel,
+    ConcatMapping,
+    DuplicateDropMapping,
     LineageGap,
     LineageGaps,
     MergeMapping,
@@ -99,6 +101,12 @@ class InMemoryLineageStore:
         # === MERGE TRACKING ===
         self.merge_mappings: list[MergeMapping] = []
         self.merge_stats: list[tuple[int, MergeStats]] = []
+
+        # === CONCAT TRACKING ===
+        self.concat_mappings: list[ConcatMapping] = []
+
+        # === DUPLICATE DROP TRACKING (debug mode) ===
+        self.duplicate_drop_mappings: list[DuplicateDropMapping] = []
 
         # === AGGREGATION MAPPINGS ===
         self.aggregation_mappings: list[AggregationMapping] = []
@@ -361,6 +369,74 @@ class InMemoryLineageStore:
             return [(sid, s) for sid, s in self.merge_stats if sid == step_id]
         return list(self.merge_stats)
 
+    # === CONCAT LOOKUP (O(log n) via searchsorted) ===
+
+    def _binary_search_mapping(
+        self, sorted_rids: Optional[np.ndarray], target_rid: int
+    ) -> Optional[int]:
+        """
+        Return index in sorted array, or None if not found.
+
+        Robust to None/empty arrays and dtype mismatches.
+        """
+        if sorted_rids is None or len(sorted_rids) == 0:
+            return None
+
+        target = np.int64(target_rid)
+        i = np.searchsorted(sorted_rids, target)
+
+        if i < len(sorted_rids) and sorted_rids[i] == target:
+            return int(i)
+        return None
+
+    def get_concat_origin(self, row_id: int) -> Optional[dict]:
+        """
+        Get which source DataFrame a row came from in a concat.
+
+        Uses binary search (O(log n)) on sorted RIDs.
+
+        Returns:
+            {step_id, source_index, source_shape, position} if found, else None.
+        """
+        for mapping in self.concat_mappings:
+            idx = self._binary_search_mapping(mapping.out_rids_sorted, row_id)
+            if idx is not None:
+                pos = int(mapping.out_pos_sorted[idx])
+                source_idx = int(mapping.source_indices[pos])
+                return {
+                    "step_id": mapping.step_id,
+                    "source_index": source_idx,
+                    "source_shape": (
+                        mapping.source_shapes[source_idx]
+                        if source_idx < len(mapping.source_shapes)
+                        else None
+                    ),
+                    "position": pos,
+                }
+        return None
+
+    # === DUPLICATE DROP LOOKUP (O(log n) via searchsorted) ===
+
+    def get_duplicate_representative(self, row_id: int) -> Optional[dict]:
+        """
+        Get which row replaced this one in drop_duplicates.
+
+        Returns:
+            {step_id, kept_rid, subset_columns, keep_strategy} if found, else None.
+            kept_rid is -1 if keep=False (no representative).
+        """
+        for mapping in self.duplicate_drop_mappings:
+            idx = self._binary_search_mapping(mapping.dropped_rids, row_id)
+            if idx is not None:
+                kept = int(mapping.kept_rids[idx])
+                return {
+                    "step_id": mapping.step_id,
+                    "kept_rid": kept if kept >= 0 else None,
+                    "subset_columns": mapping.subset_columns,
+                    "keep_strategy": mapping.keep_strategy,
+                }
+        return None
+
     # === MEMORY MANAGEMENT ===
 
     def _check_memory_and_spill(self) -> None:
@@ -567,17 +643,17 @@ class InMemoryLineageStore:
 
     def get_row_history_with_lineage(self, row_id: int, max_depth: int = 10) -> list[dict]:
         """
-        Get row history including pre-merge parent history.
+        Get row history including pre-merge and pre-concat parent history.
 
-        Follows merge lineage recursively to build complete cell provenance.
-        This is essential for tracking changes that happened before merge operations.
+        Follows merge and concat lineage recursively to build complete cell provenance.
+        This is essential for tracking changes that happened before merge/concat operations.
 
         Deduplicates events by (col, old_val, new_val, operation) signature to prevent
         cross-pipeline contamination when multiple DataFrames share row IDs.
 
         Args:
             row_id: Row ID to trace
-            max_depth: Maximum merge depth to follow (prevents infinite loops)
+            max_depth: Maximum lineage depth to follow (prevents infinite loops)
 
         Returns:
             List of UNIQUE events in chronological order, including parent row events.
@@ -592,11 +668,20 @@ class InMemoryLineageStore:
             events = []
 
             # Check if this row came from a merge
-            origin = self.get_merge_origin(rid)
-            if origin and origin["left_parent"] is not None:
+            merge_origin = self.get_merge_origin(rid)
+            if merge_origin and merge_origin["left_parent"] is not None:
                 # Recursively get parent's history first (chronological order)
-                parent_events = _collect_history(origin["left_parent"], depth + 1)
+                parent_events = _collect_history(merge_origin["left_parent"], depth + 1)
                 events.extend(parent_events)
+
+            # Check if this row came from a concat
+            # For concat, parent_rid == rid (identity mapping), so we don't recurse
+            # But we record the concat step for completeness
+            concat_origin = self.get_concat_origin(rid)
+            if concat_origin:
+                # Concat preserves RIDs, so the "parent" is the same RID
+                # The concat step itself is recorded in the step events
+                pass
 
             # Add this row's direct events
             events.extend(self.get_row_history(rid))

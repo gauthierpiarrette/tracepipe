@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 
 from ..context import TracePipeContext, get_context
-from ..core import CompletenessLevel
+from ..core import CompletenessLevel, DuplicateDropMapping
 from ..safety import TracePipeWarning, get_caller_info
 
 # ============ MASK DERIVATION FUNCTIONS ============
@@ -95,6 +95,95 @@ def derive_drop_duplicates_mask(
 
     kept_mask = ~df.duplicated(subset=subset, keep=keep)
     return kept_mask.values, completeness
+
+
+def derive_drop_duplicates_provenance(
+    df: pd.DataFrame,
+    source_rids: np.ndarray,
+    subset: Optional[list[str]],
+    keep: str,
+) -> Optional[DuplicateDropMapping]:
+    """
+    Derive dropped->kept mapping for drop_duplicates (debug mode only).
+
+    Uses hash_pandas_object for NaN-safe, fast key comparison.
+    Uses vectorized groupby min/max for representative selection.
+
+    Args:
+        df: Source DataFrame
+        source_rids: Row IDs for each row in df
+        subset: Columns to consider for duplicates (None = all)
+        keep: 'first', 'last', or False
+
+    Returns:
+        DuplicateDropMapping if any rows were dropped, else None.
+    """
+    n = len(df)
+    if n == 0:
+        return None
+
+    # Determine columns to hash
+    if subset is None:
+        hash_df = df
+        valid_cols = tuple(df.columns)
+    else:
+        valid_cols = tuple(c for c in subset if c in df.columns)
+        if not valid_cols:
+            return None
+        hash_df = df[list(valid_cols)]
+
+    # Use hash_pandas_object for fast, NaN-safe key hashing
+    try:
+        h = pd.util.hash_pandas_object(hash_df, index=False)
+        codes, _ = pd.factorize(h, sort=False)
+    except Exception:
+        # Fallback: can't hash, skip provenance
+        return None
+
+    # Compute kept mask using pandas (ground truth)
+    kept_mask = ~df.duplicated(subset=list(valid_cols) if valid_cols else None, keep=keep)
+    dropped_mask = ~kept_mask.values
+
+    if not dropped_mask.any():
+        return None  # No duplicates dropped
+
+    dropped_positions = np.where(dropped_mask)[0]
+    dropped_rids = source_rids[dropped_positions]
+
+    # Find representative positions using vectorized groupby min/max
+    positions = np.arange(n, dtype=np.int64)
+
+    if keep == "first":
+        # Representative = first occurrence of each group
+        rep_pos = pd.Series(positions).groupby(codes).min().to_numpy()
+    elif keep == "last":
+        # Representative = last occurrence of each group
+        rep_pos = pd.Series(positions).groupby(codes).max().to_numpy()
+    else:
+        # keep=False: no representative (all duplicates dropped)
+        rep_pos = None
+
+    # Build kept_rids array
+    if rep_pos is not None:
+        dropped_codes = codes[dropped_positions]
+        kept_positions = rep_pos[dropped_codes]
+        kept_rids = source_rids[kept_positions]
+    else:
+        # keep=False: no representative
+        kept_rids = np.full(len(dropped_rids), -1, dtype=np.int64)
+
+    # Sort by dropped_rids for O(log n) lookup
+    sort_order = np.argsort(dropped_rids)
+    dropped_rids_sorted = dropped_rids[sort_order].copy()
+    kept_rids_sorted = kept_rids[sort_order].copy()
+
+    return DuplicateDropMapping(
+        step_id=-1,  # Will be set by caller
+        dropped_rids=dropped_rids_sorted,
+        kept_rids=kept_rids_sorted,
+        subset_columns=valid_cols if valid_cols else None,
+        keep_strategy=str(keep),
+    )
 
 
 def derive_query_mask(
@@ -257,12 +346,19 @@ def _capture_filter_with_mask(
     kept_mask: Optional[np.ndarray] = None
     positions: Optional[np.ndarray] = None
     completeness = CompletenessLevel.FULL
+    dedup_mapping: Optional[DuplicateDropMapping] = None
 
     if method_name == "dropna":
         kept_mask, completeness = derive_dropna_mask(source_df, args, kwargs)
 
     elif method_name == "drop_duplicates":
         kept_mask, completeness = derive_drop_duplicates_mask(source_df, args, kwargs)
+        # Compute provenance mapping in debug mode
+        dedup_mapping = None
+        if ctx.config.should_capture_merge_provenance:
+            subset = kwargs.get("subset", None)
+            keep = kwargs.get("keep", "first")
+            dedup_mapping = derive_drop_duplicates_provenance(source_df, source_rids, subset, keep)
 
     elif method_name == "query":
         kept_mask, completeness = derive_query_mask(source_df, args, kwargs)
@@ -358,6 +454,12 @@ def _capture_filter_with_mask(
                 step_id=step_id,
                 watched_columns=ctx.watched_columns,
             )
+
+    # === RECORD DROP_DUPLICATES PROVENANCE (debug mode) ===
+    if method_name == "drop_duplicates" and dedup_mapping is not None:
+        # Update step_id in the mapping and store it
+        dedup_mapping.step_id = step_id
+        store.duplicate_drop_mappings.append(dedup_mapping)
 
 
 def _propagate_by_index_fallback(

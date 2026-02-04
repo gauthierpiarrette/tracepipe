@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 
 from ..context import get_context
-from ..core import CompletenessLevel, MergeMapping, MergeStats
+from ..core import CompletenessLevel, ConcatMapping, MergeMapping, MergeStats
 from ..safety import TracePipeWarning, get_caller_info
 
 
@@ -382,53 +382,199 @@ def wrap_join_with_lineage(original_join):
 def wrap_concat_with_lineage(original_concat):
     """
     Wrap pd.concat with lineage capture.
+
+    For axis=0 (vertical concat):
+    - Preserves row IDs from source DataFrames (FULL provenance)
+    - Tracks which source DataFrame each row came from
+
+    For axis=1 (horizontal concat):
+    - Propagates RIDs if all inputs have identical RID arrays
+    - Otherwise marks as PARTIAL
     """
 
     @wraps(original_concat)
     def wrapper(objs, *args, **kwargs):
         ctx = get_context()
 
-        result = original_concat(objs, *args, **kwargs)
-
         if not ctx.enabled:
-            return result
+            return original_concat(objs, *args, **kwargs)
+
+        axis = kwargs.get("axis", 0)
+
+        # === BEFORE: Capture source RIDs from all tracked DataFrames ===
+        source_data = []  # [(rids_copy, shape, original_index), ...]
+        try:
+            objs_list = list(objs) if hasattr(objs, "__iter__") else [objs]
+        except TypeError:
+            objs_list = [objs]
+
+        for i, obj in enumerate(objs_list):
+            if isinstance(obj, pd.DataFrame) and len(obj) > 0:
+                rids = ctx.row_manager.get_ids_array(obj)
+                if rids is None:
+                    rids = ctx.row_manager.register(obj)
+                # IMPORTANT: Make a copy to avoid mutation issues
+                source_data.append((rids.copy(), obj.shape, i))
+
+        # === RUN ORIGINAL ===
+        try:
+            result = original_concat(objs_list, *args, **kwargs)
+        except Exception:
+            raise  # Don't store mapping on failure
 
         if not isinstance(result, pd.DataFrame):
             return result
 
-        try:
-            row_mgr = ctx.row_manager
-            store = ctx.store
+        row_mgr = ctx.row_manager
+        store = ctx.store
+        code_file, code_line = get_caller_info(skip_frames=2)
 
-            # Register result
+        # Compute input shapes for step metadata
+        input_shapes = [sd[1] for sd in source_data]
+
+        # === AXIS=0: Vertical concat with FULL provenance ===
+        if axis == 0 and source_data:
+            return _concat_axis0_with_provenance(
+                result, source_data, input_shapes, code_file, code_line, ctx
+            )
+
+        # === AXIS=1: Horizontal concat ===
+        elif axis == 1 and source_data:
+            return _concat_axis1_with_provenance(
+                result, source_data, input_shapes, code_file, code_line, ctx
+            )
+
+        # === FALLBACK: Unknown axis or no source data ===
+        else:
             row_mgr.register(result)
-
-            code_file, code_line = get_caller_info(skip_frames=2)
-
-            # Compute input shapes
-            input_shapes = []
-            for obj in objs:
-                if hasattr(obj, "shape"):
-                    input_shapes.append(obj.shape)
-
             store.append_step(
                 operation="pd.concat",
                 stage=ctx.current_stage,
                 code_file=code_file,
                 code_line=code_line,
                 params={
-                    "axis": kwargs.get("axis", 0),
-                    "n_inputs": len(objs) if hasattr(objs, "__len__") else 1,
+                    "axis": axis,
+                    "n_inputs": len(source_data),
                 },
                 input_shape=tuple(input_shapes) if input_shapes else None,
                 output_shape=result.shape,
-                completeness=CompletenessLevel.PARTIAL,  # Concat resets lineage
+                completeness=CompletenessLevel.PARTIAL,
             )
-        except Exception as e:
-            if ctx.config.strict_mode:
-                raise
-            warnings.warn(f"TracePipe: Concat capture failed: {e}", TracePipeWarning)
-
-        return result
+            return result
 
     return wrapper
+
+
+def _concat_axis0_with_provenance(result, source_data, input_shapes, code_file, code_line, ctx):
+    """
+    Handle axis=0 concat with FULL row provenance.
+
+    Preserves source RIDs and tracks which source DF each row came from.
+    """
+    row_mgr = ctx.row_manager
+    store = ctx.store
+
+    # Build concatenated RID array and source index array
+    all_rids = np.concatenate([sd[0] for sd in source_data])
+    all_source_idx = np.concatenate(
+        [np.full(len(sd[0]), sd[2], dtype=np.int32) for sd in source_data]
+    )
+
+    # Validate: length must match result
+    if len(all_rids) != len(result):
+        # Mismatch - some objects contributed differently (empty DFs, Series, etc.)
+        # Degrade gracefully to PARTIAL
+        row_mgr.register(result)
+        store.append_step(
+            operation="pd.concat",
+            stage=ctx.current_stage,
+            code_file=code_file,
+            code_line=code_line,
+            params={
+                "axis": 0,
+                "n_inputs": len(source_data),
+                "_length_mismatch": True,
+            },
+            input_shape=tuple(input_shapes) if input_shapes else None,
+            output_shape=result.shape,
+            completeness=CompletenessLevel.PARTIAL,
+        )
+        return result
+
+    # Propagate RIDs to result (preserving lineage!)
+    row_mgr.set_result_rids(result, all_rids.copy())
+
+    # Build sorted arrays for O(log n) lookup
+    sort_order = np.argsort(all_rids)
+    out_rids_sorted = all_rids[sort_order].copy()
+    out_pos_sorted = sort_order.copy()
+
+    # Record step with FULL completeness
+    step_id = store.append_step(
+        operation="pd.concat",
+        stage=ctx.current_stage,
+        code_file=code_file,
+        code_line=code_line,
+        params={
+            "axis": 0,
+            "n_inputs": len(source_data),
+        },
+        input_shape=tuple(input_shapes) if input_shapes else None,
+        output_shape=result.shape,
+        completeness=CompletenessLevel.FULL,
+    )
+
+    # Store mapping
+    mapping = ConcatMapping(
+        step_id=step_id,
+        out_rids=all_rids.copy(),
+        source_indices=all_source_idx.copy(),
+        out_rids_sorted=out_rids_sorted,
+        out_pos_sorted=out_pos_sorted,
+        source_shapes=list(input_shapes),
+    )
+    store.concat_mappings.append(mapping)
+
+    return result
+
+
+def _concat_axis1_with_provenance(result, source_data, input_shapes, code_file, code_line, ctx):
+    """
+    Handle axis=1 concat with best-effort provenance.
+
+    If all inputs have identical RID arrays, propagate them (FULL).
+    Otherwise, mark as PARTIAL and register new RIDs.
+    """
+    row_mgr = ctx.row_manager
+    store = ctx.store
+
+    # Check if all inputs have the same RIDs in same order
+    first_rids = source_data[0][0]
+    all_same = all(
+        len(sd[0]) == len(first_rids) and np.array_equal(sd[0], first_rids) for sd in source_data
+    )
+
+    if all_same and len(first_rids) == len(result):
+        # All inputs have identical RIDs - propagate them
+        row_mgr.set_result_rids(result, first_rids.copy())
+        completeness = CompletenessLevel.FULL
+    else:
+        # Misaligned or different RIDs - register new RIDs
+        row_mgr.register(result)
+        completeness = CompletenessLevel.PARTIAL
+
+    store.append_step(
+        operation="pd.concat",
+        stage=ctx.current_stage,
+        code_file=code_file,
+        code_line=code_line,
+        params={
+            "axis": 1,
+            "n_inputs": len(source_data),
+        },
+        input_shape=tuple(input_shapes) if input_shapes else None,
+        output_shape=result.shape,
+        completeness=completeness,
+    )
+
+    return result
