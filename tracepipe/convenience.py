@@ -60,6 +60,8 @@ class CheckResult:
         .retention    - Row retention rate (0.0-1.0)
         .n_dropped    - Total rows dropped
         .drops_by_op  - Drops broken down by operation
+        .n_changes    - Total cell-level changes (debug mode only)
+        .changes_by_op - Changes broken down by operation (debug mode only)
     """
 
     ok: bool
@@ -69,6 +71,9 @@ class CheckResult:
     mode: str
     # Internal: store drops_by_op so we don't need to recompute
     _drops_by_op: dict[str, int] = field(default_factory=dict)
+    # Internal: store cell change counts (debug mode only)
+    _n_changes: int = 0
+    _changes_by_op: dict[str, int] = field(default_factory=dict)
 
     # === CONVENIENCE PROPERTIES ===
 
@@ -96,6 +101,16 @@ class CheckResult:
     def n_steps(self) -> int:
         """Total pipeline steps recorded."""
         return self.facts.get("total_steps", 0)
+
+    @property
+    def n_changes(self) -> int:
+        """Total cell-level changes (debug mode only, 0 if not tracked)."""
+        return self._n_changes
+
+    @property
+    def changes_by_op(self) -> dict[str, int]:
+        """Cell changes broken down by operation (debug mode only)."""
+        return self._changes_by_op
 
     # === EXISTING PROPERTIES ===
 
@@ -126,6 +141,20 @@ class CheckResult:
         status = "[OK] Pipeline healthy" if self.ok else "[WARN] Issues detected"
         lines.append(f"TracePipe Check: {status}")
         lines.append(f"  Mode: {self.mode}")
+
+        # Always show key metrics in compact form
+        if self.retention is not None:
+            lines.append(f"\nRetention: {int(self.retention * 100)}%")
+        if self.n_dropped > 0:
+            lines.append(f"Dropped: {self.n_dropped} rows")
+            if self.drops_by_op:
+                for op, count in list(self.drops_by_op.items())[:5]:
+                    lines.append(f"  • {op}: {count}")
+        if self.n_changes > 0:
+            lines.append(f"\nValue changes: {self.n_changes} cells")
+            if self.changes_by_op:
+                for op, count in list(self.changes_by_op.items())[:5]:
+                    lines.append(f"  • {op}: {count}")
 
         if verbose and self.facts:
             lines.append("\n  Measured facts:")
@@ -158,6 +187,8 @@ class CheckResult:
             "n_dropped": self.n_dropped,
             "n_steps": self.n_steps,
             "drops_by_op": self.drops_by_op,
+            "n_changes": self.n_changes,
+            "changes_by_op": self.changes_by_op,
             "facts": self.facts,
             "suggestions": self.suggestions,
             "warnings": [
@@ -191,6 +222,7 @@ class TraceResult:
     Events are in CHRONOLOGICAL order (oldest->newest).
 
     Key attributes:
+        status: "alive" or "dropped" (string representation)
         origin: Where this row came from (concat, merge, or original)
         representative: If dropped by dedup, which row was kept instead
     """
@@ -207,6 +239,27 @@ class TraceResult:
     # v0.4+ provenance
     concat_origin: dict[str, Any] | None = None
     dedup_representative: dict[str, Any] | None = None
+    # Steps this row survived (for SURVIVED event generation)
+    _survived_steps: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def status(self) -> str:
+        """Row status as string: 'alive' or 'dropped'."""
+        return "alive" if self.is_alive else "dropped"
+
+    @property
+    def dropped_by(self) -> str | None:
+        """Operation that dropped this row, or None if alive."""
+        if self.dropped_at:
+            return self.dropped_at.get("operation")
+        return None
+
+    @property
+    def dropped_at_step(self) -> int | None:
+        """Step number where this row was dropped, or None if alive."""
+        if self.dropped_at:
+            return self.dropped_at.get("step_id")
+        return None
 
     @property
     def n_events(self) -> int:
@@ -258,8 +311,10 @@ class TraceResult:
         """Export to dictionary."""
         return {
             "row_id": self.row_id,
+            "status": self.status,
             "is_alive": self.is_alive,
             "dropped_at": self.dropped_at,
+            "dropped_by": self.dropped_at.get("operation") if self.dropped_at else None,
             "origin": self.origin,
             "representative": self.representative,
             "n_events": self.n_events,
@@ -280,10 +335,11 @@ class TraceResult:
 
         lines = [f"Row {self.row_id} Journey:"]
 
+        # Status line matches documentation format
         if self.is_alive:
             lines.append("  Status: [OK] Alive")
         else:
-            lines.append("  Status: [X] Dropped")
+            lines.append("  Status: [DROPPED]")
             if self.dropped_at:
                 lines.append(
                     f"    at step {self.dropped_at['step_id']}: {self.dropped_at['operation']}"
@@ -579,6 +635,21 @@ def check(
         if count > 1000:
             suggestions.append(f"'{op}' dropped {count} rows - review if intentional")
 
+    # === CELL CHANGES (debug mode only) ===
+    n_changes = 0
+    changes_by_op: dict[str, int] = {}
+    if ctx.config.mode == TracePipeMode.DEBUG:
+        # Count non-drop diffs (cell-level changes)
+        step_map = {s.step_id: s.operation for s in ctx.store.steps}
+        for i in range(len(ctx.store.diff_step_ids)):
+            col = ctx.store.diff_cols[i]
+            if col != "__row__":  # Skip drop events
+                n_changes += 1
+                step_id = ctx.store.diff_step_ids[i]
+                op = step_map.get(step_id, "unknown")
+                changes_by_op[op] = changes_by_op.get(op, 0) + 1
+        facts["n_changes"] = n_changes
+
     ok = len([w for w in warnings_list if w.severity == "fact"]) == 0
 
     return CheckResult(
@@ -588,6 +659,8 @@ def check(
         suggestions=suggestions,
         mode=ctx.config.mode.value,
         _drops_by_op=drops_by_op,
+        _n_changes=n_changes,
+        _changes_by_op=changes_by_op,
     )
 
 
@@ -595,6 +668,7 @@ def trace(
     df: pd.DataFrame,
     *,
     row: int | None = None,
+    row_id: int | None = None,
     where: dict[str, Any] | None = None,
     include_ghost: bool = True,
 ) -> TraceResult | list[TraceResult]:
@@ -603,7 +677,8 @@ def trace(
 
     Args:
         df: DataFrame to search in
-        row: Row ID (if known)
+        row: Row position (0-based index into current DataFrame)
+        row_id: Internal row ID (use for tracing dropped rows)
         where: Selector dict, e.g. {"customer_id": "C123"}
         include_ghost: Include last-known values for dropped rows
 
@@ -612,8 +687,14 @@ def trace(
         Use print(result) for pretty output, result.to_dict() for data.
 
     Examples:
-        result = tp.trace(df, row=5)
-        print(result)
+        # Trace by position in current DataFrame
+        result = tp.trace(df, row=0)  # First row
+
+        # Trace by internal row ID (for dropped rows)
+        dropped = tp.debug.inspect().dropped_rows()
+        result = tp.trace(df, row_id=dropped[0])
+
+        # Trace by business key
         tp.trace(df, where={"customer_id": "C123"})
     """
     ctx = get_context()
@@ -624,12 +705,30 @@ def trace(
         pass
 
     # Resolve row IDs
-    if row is not None:
-        row_ids = [row]
+    if row_id is not None:
+        # Direct row ID specified - use as-is
+        row_ids = [row_id]
+    elif row is not None:
+        # row= is a DataFrame index position (0-based), not a row ID
+        # Convert to actual row ID using the DataFrame's registered IDs
+        rids = ctx.row_manager.get_ids_array(df)
+        if rids is not None:
+            # Handle negative indexing
+            if row < 0:
+                row = len(rids) + row
+            if 0 <= row < len(rids):
+                row_ids = [int(rids[row])]
+            else:
+                raise ValueError(
+                    f"Row index {row} out of bounds for DataFrame with {len(rids)} rows"
+                )
+        else:
+            # DataFrame not tracked - use row as-is (legacy behavior)
+            row_ids = [row]
     elif where is not None:
         row_ids = _resolve_where(df, where, ctx)
     else:
-        raise ValueError("Must provide 'row' or 'where'")
+        raise ValueError("Must provide 'row', 'row_id', or 'where'")
 
     results = []
     for rid in row_ids:
@@ -644,6 +743,7 @@ def why(
     *,
     col: str,
     row: int | None = None,
+    row_id: int | None = None,
     where: dict[str, Any] | None = None,
 ) -> WhyResult | list[WhyResult]:
     """
@@ -652,7 +752,8 @@ def why(
     Args:
         df: DataFrame to search in
         col: Column name to trace
-        row: Row ID (if known)
+        row: Row position (0-based index into current DataFrame)
+        row_id: Internal row ID (use for cells in dropped rows)
         where: Selector dict, e.g. {"customer_id": "C123"}
 
     Returns:
@@ -660,7 +761,7 @@ def why(
         Use print(result) for pretty output, result.to_dict() for data.
 
     Examples:
-        result = tp.why(df, col="amount", row=5)
+        result = tp.why(df, col="amount", row=0)  # First row
         print(result)
         tp.why(df, col="email", where={"user_id": "U123"})
     """
@@ -676,12 +777,30 @@ def why(
         )
 
     # Resolve row IDs
-    if row is not None:
-        row_ids = [row]
+    if row_id is not None:
+        # Direct row ID specified - use as-is
+        row_ids = [row_id]
+    elif row is not None:
+        # row= is a DataFrame index position (0-based), not a row ID
+        # Convert to actual row ID using the DataFrame's registered IDs
+        rids = ctx.row_manager.get_ids_array(df)
+        if rids is not None:
+            # Handle negative indexing
+            if row < 0:
+                row = len(rids) + row
+            if 0 <= row < len(rids):
+                row_ids = [int(rids[row])]
+            else:
+                raise ValueError(
+                    f"Row index {row} out of bounds for DataFrame with {len(rids)} rows"
+                )
+        else:
+            # DataFrame not tracked - use row as-is (legacy behavior)
+            row_ids = [row]
     elif where is not None:
         row_ids = _resolve_where(df, where, ctx)
     else:
-        raise ValueError("Must provide 'row' or 'where'")
+        raise ValueError("Must provide 'row', 'row_id', or 'where'")
 
     results = []
     for rid in row_ids:
