@@ -164,14 +164,15 @@ Health check for a DataFrame's lineage.
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| `.passed` | `bool` | True if healthy |
+| `.ok` | `bool` | True if no FACT-level warnings |
+| `.passed` | `bool` | Alias for `.ok` |
 | `.mode` | `str` | Current tracking mode |
-| `.retention` | `float` | Row retention rate (0-1) |
-| `.n_dropped` | `int` | Total dropped rows |
-| `.n_changes` | `int` | Total cell changes |
-| `.warnings` | `list[str]` | Any warnings |
-| `.drops_by_op` | `dict` | Drops by operation |
-| `.changes_by_op` | `dict` | Changes by operation |
+| `.retention` | `float \| None` | Row retention rate (0.0-1.0) |
+| `.n_dropped` | `int` | Total rows dropped |
+| `.n_steps` | `int` | Total pipeline steps recorded |
+| `.drops_by_op` | `dict[str, int]` | Drops by operation name |
+| `.warnings` | `list[CheckWarning]` | Warning objects with details |
+| `.facts` | `dict` | Raw measured facts (for power users) |
 
 **Example:**
 

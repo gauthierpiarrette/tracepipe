@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `trace.representative` — For dedup-dropped rows: `{"kept_rid": 42, "subset": ["key"], "keep": "first"}`
   - No need to access internal `.store` methods — everything is in `tp.trace()` result
 
+- **Clean `CheckResult` API** (UX improvement):
+  - `result.passed` — Alias for `.ok` (common naming convention)
+  - `result.retention` — Row retention rate (0.0-1.0) from `.facts`
+  - `result.n_dropped` — Total rows dropped
+  - `result.n_steps` — Total pipeline steps recorded
+  - `result.drops_by_op` — Drops broken down by operation name
+  - All properties are now discoverable via autocomplete
+
 - **New data structures in `core.py`**:
   - `ConcatMapping`: Tracks row provenance through concat operations
   - `DuplicateDropMapping`: Tracks dropped->kept relationships in drop_duplicates

@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `trace.representative` — For dedup drops: `{"kept_rid": 42, "subset": ["key"], "keep": "first"}`
   - No need to access internal `.store` methods
 
+- **Clean `CheckResult` API**:
+  - `result.passed` — Alias for `.ok`
+  - `result.retention` — Row retention rate (0.0-1.0)
+  - `result.n_dropped`, `result.n_steps`, `result.drops_by_op`
+  - All properties discoverable via autocomplete
+
 - **Comprehensive test suite**: 38 new tests covering concat, dedup, and TraceResult API
 
 ### Changed

@@ -54,6 +54,12 @@ class CheckResult:
 
     Separates FACTS (observed, high confidence) from HEURISTICS (inferred).
     .ok is True only if there are no FACT-level warnings.
+
+    Key properties for quick access:
+        .passed       - Alias for .ok (common naming convention)
+        .retention    - Row retention rate (0.0-1.0)
+        .n_dropped    - Total rows dropped
+        .drops_by_op  - Drops broken down by operation
     """
 
     ok: bool
@@ -61,6 +67,37 @@ class CheckResult:
     facts: dict[str, Any]
     suggestions: list[str]
     mode: str
+    # Internal: store drops_by_op so we don't need to recompute
+    _drops_by_op: dict[str, int] = field(default_factory=dict)
+
+    # === CONVENIENCE PROPERTIES ===
+
+    @property
+    def passed(self) -> bool:
+        """Alias for .ok (matches common naming convention)."""
+        return self.ok
+
+    @property
+    def retention(self) -> float | None:
+        """Row retention rate (0.0-1.0), or None if not computed."""
+        return self.facts.get("retention_rate")
+
+    @property
+    def n_dropped(self) -> int:
+        """Total number of rows dropped."""
+        return self.facts.get("rows_dropped", 0)
+
+    @property
+    def drops_by_op(self) -> dict[str, int]:
+        """Drops broken down by operation name."""
+        return self._drops_by_op
+
+    @property
+    def n_steps(self) -> int:
+        """Total pipeline steps recorded."""
+        return self.facts.get("total_steps", 0)
+
+    # === EXISTING PROPERTIES ===
 
     @property
     def has_warnings(self) -> bool:
@@ -115,7 +152,12 @@ class CheckResult:
         """Export to dictionary."""
         return {
             "ok": self.ok,
+            "passed": self.passed,
             "mode": self.mode,
+            "retention": self.retention,
+            "n_dropped": self.n_dropped,
+            "n_steps": self.n_steps,
+            "drops_by_op": self.drops_by_op,
             "facts": self.facts,
             "suggestions": self.suggestions,
             "warnings": [
@@ -532,8 +574,8 @@ def check(
                 )
             )
 
-    drops_by_step = ctx.store.get_dropped_by_step()
-    for op, count in drops_by_step.items():
+    drops_by_op = ctx.store.get_dropped_by_step()
+    for op, count in drops_by_op.items():
         if count > 1000:
             suggestions.append(f"'{op}' dropped {count} rows - review if intentional")
 
@@ -545,6 +587,7 @@ def check(
         facts=facts,
         suggestions=suggestions,
         mode=ctx.config.mode.value,
+        _drops_by_op=drops_by_op,
     )
 
 

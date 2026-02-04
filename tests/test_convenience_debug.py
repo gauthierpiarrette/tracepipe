@@ -192,6 +192,125 @@ class TestCheckResult:
         assert d["facts"]["key"] == "value"
         assert len(d["warnings"]) == 1
 
+    # === CONVENIENCE PROPERTY TESTS (v0.4+) ===
+
+    def test_passed_property_alias_for_ok(self):
+        """passed is an alias for ok."""
+        result_ok = CheckResult(ok=True, warnings=[], facts={}, suggestions=[], mode="debug")
+        result_fail = CheckResult(ok=False, warnings=[], facts={}, suggestions=[], mode="debug")
+        assert result_ok.passed is True
+        assert result_ok.passed == result_ok.ok
+        assert result_fail.passed is False
+        assert result_fail.passed == result_fail.ok
+
+    def test_retention_property(self):
+        """retention returns retention_rate from facts."""
+        result = CheckResult(
+            ok=True,
+            warnings=[],
+            facts={"retention_rate": 0.847},
+            suggestions=[],
+            mode="debug",
+        )
+        assert result.retention == 0.847
+
+    def test_retention_property_none_when_missing(self):
+        """retention returns None when retention_rate not in facts."""
+        result = CheckResult(ok=True, warnings=[], facts={}, suggestions=[], mode="debug")
+        assert result.retention is None
+
+    def test_n_dropped_property(self):
+        """n_dropped returns rows_dropped from facts."""
+        result = CheckResult(
+            ok=True,
+            warnings=[],
+            facts={"rows_dropped": 153},
+            suggestions=[],
+            mode="debug",
+        )
+        assert result.n_dropped == 153
+
+    def test_n_dropped_property_zero_default(self):
+        """n_dropped returns 0 when rows_dropped not in facts."""
+        result = CheckResult(ok=True, warnings=[], facts={}, suggestions=[], mode="debug")
+        assert result.n_dropped == 0
+
+    def test_n_steps_property(self):
+        """n_steps returns total_steps from facts."""
+        result = CheckResult(
+            ok=True,
+            warnings=[],
+            facts={"total_steps": 5},
+            suggestions=[],
+            mode="debug",
+        )
+        assert result.n_steps == 5
+
+    def test_drops_by_op_property(self):
+        """drops_by_op returns the _drops_by_op dict."""
+        result = CheckResult(
+            ok=True,
+            warnings=[],
+            facts={},
+            suggestions=[],
+            mode="debug",
+            _drops_by_op={"dropna": 42, "filter": 111},
+        )
+        assert result.drops_by_op == {"dropna": 42, "filter": 111}
+
+    def test_drops_by_op_empty_default(self):
+        """drops_by_op returns empty dict when not set."""
+        result = CheckResult(ok=True, warnings=[], facts={}, suggestions=[], mode="debug")
+        assert result.drops_by_op == {}
+
+    def test_to_dict_includes_convenience_fields(self):
+        """to_dict includes convenience property values."""
+        result = CheckResult(
+            ok=True,
+            warnings=[],
+            facts={"retention_rate": 0.85, "rows_dropped": 15, "total_steps": 3},
+            suggestions=[],
+            mode="debug",
+            _drops_by_op={"dropna": 15},
+        )
+        d = result.to_dict()
+        assert d["passed"] is True
+        assert d["retention"] == 0.85
+        assert d["n_dropped"] == 15
+        assert d["n_steps"] == 3
+        assert d["drops_by_op"] == {"dropna": 15}
+
+
+class TestCheckResultIntegration:
+    """Integration tests for CheckResult convenience properties."""
+
+    def test_check_populates_convenience_properties(self):
+        """tp.check() populates convenience properties correctly."""
+        tp.enable(mode="debug")
+        df = pd.DataFrame({"a": [1, 2, None, 4, 5]})
+        df = df.dropna()
+
+        result = tp.check(df)
+
+        # Convenience properties should be accessible
+        assert isinstance(result.passed, bool)
+        assert result.retention is None or isinstance(result.retention, float)
+        assert isinstance(result.n_dropped, int)
+        assert isinstance(result.drops_by_op, dict)
+        assert isinstance(result.n_steps, int)
+
+    def test_check_drops_by_op_populated(self):
+        """tp.check() correctly populates drops_by_op."""
+        tp.enable(mode="debug")
+        df = pd.DataFrame({"a": [1, 2, None, 4, 5], "b": [1, 1, 2, 2, 3]})
+        df = df.dropna()
+        df = df.drop_duplicates(subset=["b"])
+
+        result = tp.check(df)
+
+        # Should have drops tracked by operation
+        assert "DataFrame.dropna" in result.drops_by_op or result.n_dropped > 0
+
 
 # =============================================================================
 # TraceResult TESTS
